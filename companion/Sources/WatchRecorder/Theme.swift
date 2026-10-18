@@ -85,6 +85,28 @@ struct MockRecordingWindow: View {
     }
 }
 
+/// The System Settings row the user has to switch on, drawn as they will see it.
+struct MockSettingsRow: View {
+    let pane: String
+    var on: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(pane).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                AppLogo(size: 24)
+                Text("WatchRecorder").font(.system(size: 13))
+                Spacer()
+                Toggle("", isOn: .constant(on)).toggleStyle(.switch).labelsHidden().allowsHitTesting(false)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Theme.line))
+        }
+        .frame(width: 300)
+    }
+}
+
 /// The app icon (drawn by Scripts/make-icon.swift), falling back to an SF Symbol in debug builds.
 struct AppLogo: View {
     var size: CGFloat = 96

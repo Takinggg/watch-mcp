@@ -168,6 +168,63 @@ import Testing
     }
 }
 
+@Suite(.serialized) @MainActor struct SetupProgressTests {
+    @Test func launchOpensWhereTheUserLeftTheSetup() {
+        #expect(OnboardingStep.atLaunch(resume: OnboardingStep.quality.rawValue, screenAllowed: true) == .quality)
+        #expect(OnboardingStep.atLaunch(resume: OnboardingStep.screen.rawValue, screenAllowed: false) == .screen)
+        // Back from macOS's "Quit & Reopen": straight to the first recording.
+        #expect(OnboardingStep.atLaunch(resume: OnboardingStep.screen.rawValue, screenAllowed: true) == .tryIt)
+        #expect(OnboardingStep.atLaunch(resume: nil, screenAllowed: false) == .welcome)
+        #expect(OnboardingStep.atLaunch(resume: nil, screenAllowed: true) == nil)
+        #expect(OnboardingStep.atLaunch(resume: 99, screenAllowed: true) == nil)
+    }
+
+    @Test func stepsAreRememberedUntilSetupIsFinished() {
+        let saved = (Settings.setupFinished, Settings.onboardingResumeStep)
+        defer {
+            Settings.setupFinished = saved.0
+            Settings.onboardingResumeStep = saved.1
+        }
+        Settings.setupFinished = false
+        Settings.onboardingResumeStep = nil
+        let controller = OnboardingController()
+        controller.go(to: .shortcut)
+        #expect(Settings.onboardingResumeStep == OnboardingStep.shortcut.rawValue)
+        controller.go(to: .quality)
+        #expect(Settings.onboardingResumeStep == OnboardingStep.quality.rawValue)
+        controller.finish()
+        #expect(Settings.setupFinished)
+        #expect(Settings.onboardingResumeStep == nil)
+        // Setup reopened later from the menu does not come back at every launch.
+        controller.go(to: .microphone)
+        #expect(Settings.onboardingResumeStep == nil)
+    }
+
+    @Test func movesOnByItselfOnceAStepWorksButNotWhenComingBack() async throws {
+        let saved = (Settings.setupFinished, Settings.onboardingResumeStep)
+        defer {
+            Settings.setupFinished = saved.0
+            Settings.onboardingResumeStep = saved.1
+        }
+        let controller = OnboardingController()
+        controller.go(to: .shortcut)
+        controller.shortcutPressed()
+        #expect(controller.model.step == .shortcut)  // the check mark shows first
+        try await Task.sleep(for: .seconds(1.6))
+        #expect(controller.model.step == .quality)
+        controller.back()
+        try await Task.sleep(for: .seconds(1.6))
+        #expect(controller.model.step == .shortcut)
+    }
+
+    @Test func screenRecordingComesRightBeforeTheFirstRecording() {
+        #expect(OnboardingStep.welcome.next == .microphone)
+        #expect(OnboardingStep.screen.next == .tryIt)
+        #expect(OnboardingStep.tryIt.next == nil)
+        #expect(OnboardingStep.welcome.previous == nil)
+    }
+}
+
 @Suite struct MicMeterTests {
     /// AVAudioEngine calls the tap on its own audio queue: it must run there (this crashed before).
     @Test func tapRunsOffTheMainActorAndReportsTheLevel() async {

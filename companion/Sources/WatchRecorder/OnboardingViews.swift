@@ -68,10 +68,9 @@ private struct StepLayout<Illustration: View, Content: View, Buttons: View>: Vie
 
 private struct BackButton: View {
     let controller: OnboardingController
-    let to: OnboardingStep
 
     var body: some View {
-        Button(L.t("Back", "Retour", "뒤로")) { controller.go(to: to) }.buttonStyle(.plain).foregroundStyle(.secondary)
+        Button(L.t("Back", "Retour", "뒤로")) { controller.back() }.buttonStyle(.plain).foregroundStyle(.secondary)
     }
 }
 
@@ -92,7 +91,7 @@ private struct WelcomeStep: View {
                     Bullet(symbol: "timer", text: L.t("Two minutes to set up, each step tested.", "Deux minutes de réglage, chaque étape testée.", "2분이면 설정 끝, 단계마다 직접 테스트해요."))
                 }.padding(.top, 6)
             },
-            buttons: { Button(L.t("Set up", "Commencer", "설정 시작")) { controller.go(to: .screen) }.buttonStyle(PrimaryButtonStyle()) }
+            buttons: { Button(L.t("Set up", "Commencer", "설정 시작")) { controller.next() }.buttonStyle(PrimaryButtonStyle()) }
         )
     }
 }
@@ -113,20 +112,34 @@ private struct ScreenStep: View {
     var body: some View {
         let ok = model.isGranted(.screen)
         StepLayout(
-            title: L.t("Let WatchRecorder", "Laisse WatchRecorder", "WatchRecorder가"),
-            accent: L.t("see your screen", "voir ton écran", "화면을 보게 해 주세요"),
-            text: L.t("It records the screen under your pointer only while you hold a recording, and its own windows are left out. macOS asks once, in System Settings.",
-                      "Il n'enregistre l'écran sous ton pointeur que pendant un enregistrement, sans ses propres fenêtres. macOS le demande une fois, dans les Réglages.", "녹화하는 동안에만 포인터가 있는 화면을 녹화하고, 자기 창은 빼요. macOS가 시스템 설정에서 한 번 물어봐요."),
-            illustration: { MockRecordingWindow().scaleEffect(0.72).frame(height: 170) },
-            content: { StatusChip(ok: ok, text: ok ? L.t("Allowed", "Autorisé", "허용됨") : L.t("Not allowed yet", "Pas encore autorisé", "아직 허용 안 됨")) },
+            title: L.t("Last step:", "Dernière étape :", "마지막 단계:"),
+            accent: L.t("your screen", "ton écran", "화면"),
+            text: ok ? L.t("Allowed. On to your first recording.", "Autorisé. Place à ton premier enregistrement.", "허용됐어요. 이제 첫 녹화를 해 봐요.")
+                : model.screenAsked
+                ? L.t("Switch WatchRecorder on in System Settings, then come back. If macOS offers to quit WatchRecorder, either answer works: you will land on your first recording.",
+                      "Active WatchRecorder dans les Réglages Système, puis reviens ici. Si macOS propose de quitter WatchRecorder, les deux réponses marchent : tu arriveras sur ton premier enregistrement.",
+                      "시스템 설정에서 WatchRecorder를 켠 다음 돌아오세요. macOS가 WatchRecorder를 종료하겠냐고 물으면 어느 쪽을 골라도 괜찮아요. 첫 녹화 화면으로 이어져요.")
+                : L.t("WatchRecorder records the screen only while you record, never its own windows. macOS asks for this once, in System Settings.",
+                      "WatchRecorder n'enregistre l'écran que pendant un enregistrement, jamais ses propres fenêtres. macOS le demande une seule fois, dans les Réglages Système.",
+                      "WatchRecorder는 녹화하는 동안에만 화면을 녹화하고, 자기 창은 절대 녹화하지 않아요. macOS가 시스템 설정에서 한 번만 물어봐요."),
+            illustration: {
+                MockSettingsRow(pane: L.t("Screen & System Audio Recording", "Enregistrement de l'écran et de l'audio système", "화면 및 시스템 오디오 녹화"), on: ok)
+                    .overlay(alignment: .trailing) { if ok { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.title).offset(x: 40, y: 10) } }
+                    .padding(.vertical, 18)
+            },
+            content: { EmptyView() },
             buttons: {
                 if ok {
-                    Button(L.t("Continue", "Continuer", "계속")) { controller.go(to: .microphone) }.buttonStyle(PrimaryButtonStyle())
+                    Button(L.t("Continue", "Continuer", "계속")) { controller.next() }.buttonStyle(PrimaryButtonStyle())
                 } else {
-                    Button(L.t("Allow", "Autoriser", "허용")) { Task { await Permission.screen.request() } }.buttonStyle(PrimaryButtonStyle())
-                    Button(L.t("I turned it on: relaunch", "C'est activé : relancer", "켰어요: 다시 시작")) { controller.relaunchAndResume() }.buttonStyle(SecondaryButtonStyle())
+                    Button(L.t("Open System Settings", "Ouvrir les Réglages", "시스템 설정 열기")) { controller.requestScreen() }.buttonStyle(PrimaryButtonStyle())
+                    if model.screenAsked {
+                        // Fallback when the running app does not see the change (older macOS).
+                        Button(L.t("It's on but not detected: relaunch", "C'est activé mais pas détecté : relancer", "켰는데 인식이 안 돼요: 다시 시작")) { controller.relaunchAndResume() }
+                            .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
                 }
-                BackButton(controller: controller, to: .welcome)
+                BackButton(controller: controller)
             }
         )
     }
@@ -154,7 +167,7 @@ private struct MicrophoneStep: View {
             content: { EmptyView() },
             buttons: {
                 if ok {
-                    Button(model.heardVoice ? L.t("Continue", "Continuer", "계속") : L.t("Skip the test", "Passer le test", "테스트 건너뛰기")) { controller.go(to: .shortcut) }
+                    Button(model.heardVoice ? L.t("Continue", "Continuer", "계속") : L.t("Skip the test", "Passer le test", "테스트 건너뛰기")) { controller.next() }
                         .buttonStyle(PrimaryButtonStyle(tint: model.heardVoice ? Theme.accent : .gray))
                 } else {
                     Button(L.t("Allow the microphone", "Autoriser le micro", "마이크 허용")) {
@@ -164,9 +177,9 @@ private struct MicrophoneStep: View {
                             if model.isGranted(.microphone) { controller.startMic() }
                         }
                     }.buttonStyle(PrimaryButtonStyle())
-                    Button(L.t("Continue without voice", "Continuer sans la voix", "음성 없이 계속")) { controller.go(to: .shortcut) }.buttonStyle(SecondaryButtonStyle())
+                    Button(L.t("Continue without voice", "Continuer sans la voix", "음성 없이 계속")) { controller.next() }.buttonStyle(SecondaryButtonStyle())
                 }
-                BackButton(controller: controller, to: .screen)
+                BackButton(controller: controller)
             }
         )
     }
@@ -190,9 +203,9 @@ private struct ShortcutStep: View {
                 }.pickerStyle(.segmented).frame(width: 260)
             },
             buttons: {
-                Button(model.shortcutTested ? L.t("Continue", "Continuer", "계속") : L.t("Skip the test", "Passer le test", "테스트 건너뛰기")) { controller.go(to: .quality) }
+                Button(model.shortcutTested ? L.t("Continue", "Continuer", "계속") : L.t("Skip the test", "Passer le test", "테스트 건너뛰기")) { controller.next() }
                     .buttonStyle(PrimaryButtonStyle(tint: model.shortcutTested ? Theme.accent : .gray))
-                BackButton(controller: controller, to: .microphone)
+                BackButton(controller: controller)
             }
         )
     }
@@ -211,8 +224,8 @@ private struct QualityStep: View {
             illustration: { EmptyView() },
             content: { QualityCards(selection: Binding(get: { model.quality }, set: { model.quality = $0; Settings.quality = $0 }), library: model.library) },
             buttons: {
-                Button(L.t("Continue", "Continuer", "계속")) { controller.go(to: .connect) }.buttonStyle(PrimaryButtonStyle())
-                BackButton(controller: controller, to: .shortcut)
+                Button(L.t("Continue", "Continuer", "계속")) { controller.next() }.buttonStyle(PrimaryButtonStyle())
+                BackButton(controller: controller)
             }
         )
     }
@@ -291,8 +304,8 @@ private struct ConnectStep: View {
             illustration: { EmptyView() },
             content: { ConnectPanel(controller: controller, model: model) },
             buttons: {
-                Button(L.t("Continue", "Continuer", "계속")) { controller.go(to: .tryIt) }.buttonStyle(PrimaryButtonStyle())
-                BackButton(controller: controller, to: .quality)
+                Button(L.t("Continue", "Continuer", "계속")) { controller.next() }.buttonStyle(PrimaryButtonStyle())
+                BackButton(controller: controller)
             }
         )
     }
@@ -365,10 +378,9 @@ private struct TryStep: View {
             },
             buttons: {
                 Button(model.tryResult == nil ? L.t("Skip", "Passer", "건너뛰기") : L.t("Open the library", "Ouvrir la bibliothèque", "라이브러리 열기")) {
-                    controller.close()
-                    controller.openDashboard()
+                    controller.finish()
                 }.buttonStyle(PrimaryButtonStyle(tint: model.tryResult == nil ? .gray : Theme.accent))
-                BackButton(controller: controller, to: .connect)
+                BackButton(controller: controller)
             }
         )
     }

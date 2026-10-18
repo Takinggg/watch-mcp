@@ -25,6 +25,25 @@ enum CaptureTarget {
     case window(CGWindowID)
 }
 
+/// Whether this process may record the screen right now.
+enum ScreenAccess {
+    /// CGPreflightScreenCaptureAccess keeps the answer it had at launch in a running process
+    /// (measured on macOS 26), while other apps' window titles become readable as soon as the user
+    /// allows Screen Recording: checking both lets setup go on without a relaunch.
+    static var granted: Bool { CGPreflightScreenCaptureAccess() || otherAppWindowTitlesVisible() }
+
+    /// Window titles of other apps are hidden from apps without Screen Recording access.
+    static func otherAppWindowTitlesVisible() -> Bool {
+        guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return false }
+        let me = ProcessInfo.processInfo.processIdentifier
+        return windows.contains { window in
+            (window[kCGWindowOwnerPID as String] as? Int32) != me
+                && (window[kCGWindowLayer as String] as? Int) == 0
+                && !((window[kCGWindowName as String] as? String) ?? "").isEmpty
+        }
+    }
+}
+
 /// Records the screen (and optionally the microphone) straight to a .mov file
 /// with SCRecordingOutput, so video and voice stay in sync.
 @MainActor
@@ -53,7 +72,7 @@ final class Recorder: NSObject {
     private(set) var fps: Int32 = 30
 
     func start(target: CaptureTarget, microphone: Bool, quality: Quality, to url: URL) async throws {
-        guard CGPreflightScreenCaptureAccess() else {
+        guard ScreenAccess.granted else {
             // Shows the system prompt the first time; the user then enables the app in System Settings.
             CGRequestScreenCaptureAccess()
             throw RecorderError.noPermission

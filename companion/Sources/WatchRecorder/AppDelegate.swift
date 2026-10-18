@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let spec = Settings.hotKey
         hotKey = HotKey(spec) { [weak self] in self?.toggle() }
+        log.info("screen access at launch: preflight \(CGPreflightScreenCaptureAccess(), privacy: .public), window titles \(ScreenAccess.otherAppWindowTitlesVisible(), privacy: .public)")
         log.info("launched; shortcut \(spec.display, privacy: .public) \(self.hotKey == nil ? "NOT registered" : "registered", privacy: .public); watch-mcp command: \(Settings.watchMcpCommand, privacy: .public)")
         hud.model.shortcut = spec.display
         hud.model.onStop = { [weak self] in self?.toggle() }
@@ -47,13 +48,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if hotKey == nil {
             show(L.t("\(spec.display) is used by another app. Pick another shortcut (see README).", "\(spec.display) est déjà pris par une autre app. Choisis un autre raccourci (voir README).", "\(spec.display)는 다른 앱이 쓰고 있어요. 다른 단축키를 골라 주세요(README 참고)."), seconds: 30)
             hud.show(.problem(L.t("Shortcut \(spec.display) is taken by another app", "Raccourci \(spec.display) déjà pris par une autre app", "단축키 \(spec.display)를 다른 앱이 쓰고 있어요"), settings: nil), hideAfter: 8)
-        } else if let resume = Settings.onboardingResumeStep.flatMap(OnboardingStep.init(rawValue:)) {
-            // The app relaunched itself during setup (screen recording applies at launch).
+        } else if let step = OnboardingStep.atLaunch(resume: Settings.onboardingResumeStep, screenAllowed: ScreenAccess.granted) {
+            // An unfinished setup picks up where the user left it; a new user (or a removed
+            // permission) starts it. show() saves the step again while setup is unfinished.
+            log.info("setup opens at step \(step.rawValue)")
             Settings.onboardingResumeStep = nil
-            onboarding.show(at: resume)
-        } else if !CGPreflightScreenCaptureAccess() {
-            // New user (or permission removed): walk through the setup.
-            onboarding.show(at: .welcome)
+            onboarding.show(at: step)
         } else {
             // Opening the app shows its window: the menu bar icon can be hidden behind the notch.
             dashboard.show()
@@ -223,8 +223,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if onboarding.isVisible {
             onboarding.show()
-        } else if !CGPreflightScreenCaptureAccess() {
-            onboarding.show(at: .welcome)
+        } else if let step = OnboardingStep.atLaunch(resume: Settings.onboardingResumeStep, screenAllowed: ScreenAccess.granted) {
+            onboarding.show(at: step)
         } else {
             dashboard.show()
         }

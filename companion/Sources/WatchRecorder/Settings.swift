@@ -93,10 +93,24 @@ enum Settings {
         defaults.set(text, forKey: "HotKey")
     }
 
-    /// Onboarding step to reopen after the app relaunches itself (screen recording needs a relaunch).
+    /// Setup step to reopen at the next launch while setup is not finished, so quitting (or the
+    /// "Quit & Reopen" macOS asks for once Screen Recording is allowed) does not start it over.
     static var onboardingResumeStep: Int? {
         get { defaults.object(forKey: "OnboardingResume") as? Int }
         set { defaults.set(newValue, forKey: "OnboardingResume") }
+    }
+
+    /// Set once macOS's own Screen Recording prompt was shown: it adds the app to the list in
+    /// System Settings and never comes back, so later clicks open that list directly.
+    static var screenPromptShown: Bool {
+        get { defaults.bool(forKey: "ScreenPromptShown") }
+        set { defaults.set(newValue, forKey: "ScreenPromptShown") }
+    }
+
+    /// Set when the user reaches the end of setup; from then on the app opens on the library.
+    static var setupFinished: Bool {
+        get { defaults.bool(forKey: "SetupFinished") }
+        set { defaults.set(newValue, forKey: "SetupFinished") }
     }
 }
 

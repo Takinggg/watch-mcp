@@ -27,7 +27,7 @@ enum Permission: CaseIterable, Identifiable {
 
     var granted: Bool {
         switch self {
-        case .screen: CGPreflightScreenCaptureAccess()
+        case .screen: ScreenAccess.granted
         case .microphone: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         case .accessibility: AXIsProcessTrusted()
         }
@@ -37,7 +37,11 @@ enum Permission: CaseIterable, Identifiable {
     @MainActor func request() async {
         switch self {
         case .screen:
-            if !CGRequestScreenCaptureAccess(), let url = SettingsPane.screenRecording.url { NSWorkspace.shared.open(url) }
+            // The first request shows macOS's prompt (with its own "Open System Settings" button)
+            // and adds the app to the list; opening Settings at the same time would show both.
+            let firstTime = !Settings.screenPromptShown
+            Settings.screenPromptShown = true
+            if !CGRequestScreenCaptureAccess(), !firstTime, let url = SettingsPane.screenRecording.url { NSWorkspace.shared.open(url) }
         case .microphone:
             if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
                 _ = await AVCaptureDevice.requestAccess(for: .audio)
@@ -50,8 +54,23 @@ enum Permission: CaseIterable, Identifiable {
     }
 }
 
+/// Setup order: what works in place first (microphone, shortcut, options), then Screen Recording
+/// right before the first recording, since it goes through System Settings and may need a relaunch.
 enum OnboardingStep: Int, CaseIterable {
-    case welcome, screen, microphone, shortcut, quality, connect, tryIt
+    case welcome, microphone, shortcut, quality, connect, screen, tryIt
+
+    var next: OnboardingStep? { OnboardingStep(rawValue: rawValue + 1) }
+    var previous: OnboardingStep? { OnboardingStep(rawValue: rawValue - 1) }
+
+    /// The setup step to show at launch, or nil for the library: where the user left an
+    /// unfinished setup (past Screen Recording once it is allowed, as after macOS's
+    /// "Quit & Reopen"), else the start when screen recording is not allowed.
+    static func atLaunch(resume: Int?, screenAllowed: Bool) -> OnboardingStep? {
+        if let resume, let step = OnboardingStep(rawValue: resume) {
+            return step == .screen && screenAllowed ? step.next : step
+        }
+        return screenAllowed ? nil : .welcome
+    }
 }
 
 /// One AI app as reported by `watch-mcp install --dry-run --json`.
@@ -70,6 +89,8 @@ final class OnboardingModel {
     var levels: [Double] = Array(repeating: 0, count: 24)
     var heardVoice = false
     var shortcutTested = false
+    /// The user clicked to allow Screen Recording during this setup.
+    var screenAsked = false
     var shortcut = Settings.hotKey.display
     var quality = Settings.quality
     var clients: [AIClientStatus] = []
@@ -140,6 +161,10 @@ final class OnboardingController {
     private var window: NSWindow?
     private var poll: Timer?
     private let mic = MicMeter()
+    private var advance: Task<Void, Never>?
+    /// Whether the current step had already worked when the user arrived on it (then it does not
+    /// move on by itself, so Back stays usable).
+    private var stepWasDone = false
     /// Set by the app: re-registers the global shortcut.
     var changeShortcut: (String) -> Void = { _ in }
     var openDashboard: () -> Void = {}
@@ -164,7 +189,10 @@ final class OnboardingController {
         window?.makeKeyAndOrderFront(nil)
         poll?.invalidate()
         poll = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.model.refreshPermissions() }
+            MainActor.assumeIsolated {
+                self?.model.refreshPermissions()
+                self?.advanceWhenDone()
+            }
         }
         stepChanged()
     }
@@ -181,11 +209,50 @@ final class OnboardingController {
         stepChanged()
     }
 
+    /// Forward, past Screen Recording when it is already allowed.
+    func next() {
+        guard var step = model.step.next else { return }
+        if step == .screen, model.isGranted(.screen), let after = step.next { step = after }
+        go(to: step)
+    }
+
+    func requestScreen() {
+        model.screenAsked = true
+        Task { await Permission.screen.request() }
+    }
+
+    func back() {
+        if let step = model.step.previous { go(to: step) }
+    }
+
+    /// Whether the current step has worked: permission given, voice heard, shortcut pressed.
+    private func isDone(_ step: OnboardingStep) -> Bool {
+        switch step {
+        case .screen: model.isGranted(.screen)
+        case .microphone: model.heardVoice
+        case .shortcut: model.shortcutTested
+        default: false
+        }
+    }
+
+    /// Moves on by itself a moment after the current step works, so the user only acts where
+    /// needed and sees the check mark first.
+    private func advanceWhenDone() {
+        guard advance == nil, !stepWasDone, isDone(model.step) else { return }
+        let from = model.step
+        advance = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1.2))
+            guard let self, !Task.isCancelled, self.model.step == from else { return }
+            self.next()
+        }
+    }
+
     /// While the shortcut step is shown, pressing the shortcut is a test, not a recording.
     var consumesShortcut: Bool { isVisible && model.step == .shortcut }
 
     func shortcutPressed() {
         model.shortcutTested = true
+        advanceWhenDone()
     }
 
     func recordingFinished(summary: String) {
@@ -221,10 +288,23 @@ final class OnboardingController {
         }
     }
 
+    /// End of setup: the next launches open on the library.
+    func finish() {
+        Settings.setupFinished = true
+        Settings.onboardingResumeStep = nil
+        close()
+        openDashboard()
+    }
+
     private func stepChanged() {
+        if !Settings.setupFinished { Settings.onboardingResumeStep = model.step.rawValue }
+        advance?.cancel()
+        advance = nil
+        stepWasDone = isDone(model.step)
         mic.stop()
         if model.step == .microphone, model.isGranted(.microphone) { startMic() }
-        if model.step == .connect, model.clients.isEmpty { Task { await refreshClients(install: false) } }
+        // Checked on every visit: an AI app may have been set up or installed meanwhile.
+        if model.step == .connect { Task { await refreshClients(install: false) } }
         if model.step == .tryIt { model.tryResult = nil }
     }
 
@@ -232,7 +312,10 @@ final class OnboardingController {
         mic.start { [weak self] level in
             guard let self else { return }
             self.model.levels = Array(self.model.levels.dropFirst()) + [level]
-            if level > 0.45 { self.model.heardVoice = true }
+            if level > 0.45 {
+                self.model.heardVoice = true
+                self.advanceWhenDone()
+            }
         }
     }
 
