@@ -55,7 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // New user (or permission removed): walk through the setup.
             onboarding.show(at: .welcome)
         } else {
-            // A short hello so the user sees the app is there and knows the shortcut.
+            // Opening the app shows its window: the menu bar icon can be hidden behind the notch.
+            dashboard.show()
             hud.show(.done(L.t("WatchRecorder is ready: press \(spec.display) to record", "WatchRecorder est prêt : \(spec.display) pour enregistrer", "WatchRecorder 준비 완료: \(spec.display)로 녹화하세요")), hideAfter: 4)
         }
         onboarding.changeShortcut = { [weak self] text in self?.applyHotKey(text) }
@@ -70,6 +71,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.hud.show(.problem(L.t("Recording stopped", "Enregistrement arrêté", "녹화가 멈췄어요"), settings: nil), hideAfter: 6)
         }
         refresh()
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            self?.logStatusIconPlacement()
+        }
     }
 
     @objc func toggle() {
@@ -211,6 +216,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openDashboard() {
         dashboard.show()
+    }
+
+    /// Opening the app again (Finder, Spotlight, Launchpad) while it runs shows its window,
+    /// instead of doing nothing visible.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if onboarding.isVisible {
+            onboarding.show()
+        } else if !CGPreflightScreenCaptureAccess() {
+            onboarding.show(at: .welcome)
+        } else {
+            dashboard.show()
+        }
+        logStatusIconPlacement()
+        return false
+    }
+
+    /// Logs whether the menu bar icon fits next to the notch (macOS hides icons that do not).
+    private func logStatusIconPlacement() {
+        let frame = statusItem?.button?.window?.frame ?? .zero
+        let right = NSScreen.main?.auxiliaryTopRightArea
+        log.info("status icon frame \(NSStringFromRect(frame), privacy: .public); right of notch \(right.map(NSStringFromRect) ?? "no notch", privacy: .public)")
     }
 
     /// Double-clicking a .watch bundle opens its video.
