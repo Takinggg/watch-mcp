@@ -4,7 +4,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { frameStill, MAX_FRAME_EDGE, MAX_ZOOM_FRAMES, zoomVideo } from "./drilldown.ts";
 import { describeError } from "./errors.ts";
-import { latestRecordingTool } from "./latest-tool.ts";
+import { latestPromptText, latestRecordingTool } from "./latest-tool.ts";
 import { readLatestRecording } from "./recordings.ts";
 import { parseTime } from "./time.ts";
 import { transcribeTool } from "./transcribe-tool.ts";
@@ -141,6 +141,23 @@ export function createServer(): McpServer {
     },
     async (args, extra) =>
       respond(() => latestRecordingTool({ budget: args.budget, signal: extra.signal, onProgress: progressReporter(extra) })),
+  );
+
+  server.registerPrompt(
+    "latest",
+    {
+      title: "Watch my latest recording",
+      description: "Puts the latest WatchRecorder recording (path and what you said) into this conversation, so Claude watches it.",
+    },
+    () => {
+      let text: string;
+      try {
+        text = latestPromptText();
+      } catch (err) {
+        text = describeError(err);
+      }
+      return { messages: [{ role: "user", content: { type: "text", text } }] };
+    },
   );
 
   server.registerResource(

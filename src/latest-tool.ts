@@ -29,3 +29,23 @@ export async function latestRecordingTool(params: LatestParams): Promise<ToolOut
   ].join("\n");
   return { ...out, intro: `${header}\n\n${out.intro}` };
 }
+
+/**
+ * Text of the "latest" MCP prompt: in Claude Code it is the /mcp__watch__latest command, which
+ * puts the latest recording into the current conversation without any copy and paste.
+ */
+export function latestPromptText(): string {
+  const latest = readLatestRecording();
+  if (!latest) {
+    return "I have not recorded anything with WatchRecorder yet. Tell me how to record my screen and voice for you.";
+  }
+  const said = latest.transcript === null ? "(not transcribed)" : latest.transcript.length === 0 ? "(no speech detected)" : `"${latest.transcript}"`;
+  return [
+    "Watch my latest screen recording and do what I ask in it.",
+    "",
+    `Recording: ${latest.path} (${formatTime(latest.duration)}, made ${ago(latest.startedAt)})`,
+    `What I said: ${said}`,
+    "",
+    "Call the latest_recording tool to see what I showed on screen.",
+  ].join("\n");
+}

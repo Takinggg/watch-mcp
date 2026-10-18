@@ -109,4 +109,14 @@ describe("MCP server over stdio", () => {
     assert.match(texts, /RECORDING BUNDLE Test\.watch/);
     assert.match(texts, /00:06\.0  DONE left click at x 50%, y 50% in Safari/);
   });
+
+  it("offers a latest prompt that puts the recording into the conversation", async () => {
+    const { prompts } = await client.listPrompts();
+    assert.deepEqual(prompts.map((p) => p.name), ["latest"]);
+    writeFileSync(path.join(stateDir, "latest-recording.json"), JSON.stringify({ version: 1, path: slides, startedAt: new Date().toISOString(), duration: 20, transcript: "fix the red screen" }));
+    const prompt = await client.getPrompt({ name: "latest" });
+    const text = (prompt.messages[0]?.content as { text?: string }).text ?? "";
+    assert.match(text, /What I said: "fix the red screen"/);
+    assert.match(text, /latest_recording/);
+  });
 });
