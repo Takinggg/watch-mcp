@@ -100,15 +100,7 @@ final class MicMeter {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.channelCount > 0 else { return }
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
-            guard let samples = buffer.floatChannelData?[0] else { return }
-            let count = Int(buffer.frameLength)
-            var sum: Float = 0
-            for i in 0..<count { sum += samples[i] * samples[i] }
-            let rms = count > 0 ? (sum / Float(count)).squareRoot() : 0
-            let level = min(1, max(0, (20 * log10(max(Double(rms), 1e-6)) + 50) / 50))
-            Task { @MainActor in onLevel(level) }
-        }
+        input.installTap(onBus: 0, bufferSize: 1024, format: format, block: MicMeter.tap(onLevel: onLevel))
         do {
             try engine.start()
             running = true
@@ -122,6 +114,20 @@ final class MicMeter {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         running = false
+    }
+
+    /// Made outside the main actor on purpose: AVAudioEngine calls the tap on its own audio
+    /// queue, and a block created inside this @MainActor class traps there (Swift 6 isolation check).
+    nonisolated static func tap(onLevel: @escaping @MainActor @Sendable (Double) -> Void) -> AVAudioNodeTapBlock {
+        { buffer, _ in
+            guard let samples = buffer.floatChannelData?[0] else { return }
+            let count = Int(buffer.frameLength)
+            var sum: Float = 0
+            for i in 0..<count { sum += samples[i] * samples[i] }
+            let rms = count > 0 ? (sum / Float(count)).squareRoot() : 0
+            let level = min(1, max(0, (20 * log10(max(Double(rms), 1e-6)) + 50) / 50))
+            Task { @MainActor in onLevel(level) }
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Carbon
 import Foundation
 import Testing
@@ -166,3 +167,21 @@ import Testing
         #expect([AppLanguage.en, .fr, .ko].contains(L.current))
     }
 }
+
+@Suite struct MicMeterTests {
+    /// AVAudioEngine calls the tap on its own audio queue: it must run there (this crashed before).
+    @Test func tapRunsOffTheMainActorAndReportsTheLevel() async {
+        let level = await withCheckedContinuation { (done: CheckedContinuation<Double, Never>) in
+            DispatchQueue.global().async {
+                guard let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1),
+                      let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1024),
+                      let samples = buffer.floatChannelData?[0] else { return done.resume(returning: -1) }
+                buffer.frameLength = 1024
+                for i in 0..<1024 { samples[i] = i.isMultiple(of: 2) ? 0.5 : -0.5 }
+                MicMeter.tap { level in done.resume(returning: level) }(buffer, AVAudioTime(hostTime: mach_absolute_time()))
+            }
+        }
+        #expect(level > 0.8)
+    }
+}
+
