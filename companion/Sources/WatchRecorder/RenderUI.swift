@@ -11,12 +11,22 @@ enum RenderUI {
         onboarding.model.library.folder = folder
         onboarding.model.library.reload()
         onboarding.model.refreshPermissions()
-        await onboarding.refreshClients(install: false)
+        // Sample AI apps, so the pictures do not depend on what is installed on this Mac.
+        onboarding.model.clients = [
+            AIClientStatus(client: "claude-code", label: "Claude Code", action: "ok"),
+            AIClientStatus(client: "codex", label: "Codex", action: "ok"),
+            AIClientStatus(client: "claude-desktop", label: "Claude Desktop", action: "add"),
+            AIClientStatus(client: "cursor", label: "Cursor", action: "absent"),
+        ]
         for appearance in Appearance.allCases {
             for step in OnboardingStep.allCases {
                 onboarding.model.step = step
                 if step == .microphone { onboarding.model.levels = (0..<24).map { 0.25 + 0.6 * abs(sin(Double($0) / 3)) } }
+                // The Screen Recording step as a new user first sees it.
+                let granted = onboarding.model.granted
+                if step == .screen { onboarding.model.granted[.screen] = false }
                 await save(OnboardingView(controller: onboarding, model: onboarding.model), size: CGSize(width: 640, height: 620), appearance: appearance, to: outDir.appendingPathComponent("onboarding-\(step.rawValue + 1)-\(appearance.rawValue).png"))
+                onboarding.model.granted = granted
             }
         }
         let dashboard = DashboardController(onboarding: onboarding)
