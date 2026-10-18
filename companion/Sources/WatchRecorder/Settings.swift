@@ -40,11 +40,33 @@ enum Settings {
         return value > 0 ? min(value, 120) : 10
     }
 
-    /// Where the prompt is pasted after a recording: "claude" (the Claude desktop app, default),
-    /// "frontmost" (the app in front when the recording stopped), "off", or an app's bundle id.
-    static var pasteInto: String {
-        let value = defaults.string(forKey: "PasteInto")?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
-        return value.isEmpty ? "claude" : value
+    /// Which app gets the prompt after a recording: "auto" (the AI app you were using: Claude,
+    /// ChatGPT/Codex, Cursor, VS Code or a terminal), "claude", "codex", "off", or a bundle id.
+    static var sendTo: String {
+        get {
+            let value = defaults.string(forKey: "SendTo")?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+            return value.isEmpty ? "auto" : value
+        }
+        set { defaults.set(newValue, forKey: "SendTo") }
+    }
+
+    /// Press ⌘V in that app for you (needs Accessibility). Off by default.
+    static var autoPaste: Bool {
+        get { defaults.bool(forKey: "AutoPaste") }
+        set { defaults.set(newValue, forKey: "AutoPaste") }
+    }
+
+    static var appLanguage: AppLanguage {
+        get { AppLanguage(rawValue: defaults.string(forKey: "AppLanguage") ?? "") ?? .auto }
+        set {
+            defaults.set(newValue.rawValue, forKey: "AppLanguage")
+            NotificationCenter.default.post(name: .watchRecorderLanguageChanged, object: nil)
+        }
+    }
+
+    static var quality: Quality {
+        get { Quality(rawValue: defaults.string(forKey: "Quality") ?? "") ?? .balanced }
+        set { defaults.set(newValue.rawValue, forKey: "Quality") }
     }
 
     static var recordMicrophone: Bool {
@@ -64,6 +86,17 @@ enum Settings {
 
     static var hotKey: HotKeySpec {
         HotKeySpec.parse(defaults.string(forKey: "HotKey") ?? "") ?? HotKeySpec.default
+    }
+
+    /// Stores a shortcut in the same text form users can write with `defaults` ("ctrl+opt+r").
+    static func setHotKey(_ text: String) {
+        defaults.set(text, forKey: "HotKey")
+    }
+
+    /// Onboarding step to reopen after the app relaunches itself (screen recording needs a relaunch).
+    static var onboardingResumeStep: Int? {
+        get { defaults.object(forKey: "OnboardingResume") as? Int }
+        set { defaults.set(newValue, forKey: "OnboardingResume") }
     }
 }
 

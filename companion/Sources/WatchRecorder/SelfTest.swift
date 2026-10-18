@@ -23,7 +23,7 @@ enum SelfTest {
         try? await Task.sleep(for: .milliseconds(500))
         let recorder = Recorder()
         do {
-            try await recorder.start(target: .window(CGWindowID(window.windowNumber)), microphone: false, to: output)
+            try await recorder.start(target: .window(CGWindowID(window.windowNumber)), microphone: false, quality: .light, to: output)
             try await Task.sleep(for: .seconds(seconds))
             let duration = try await recorder.stop()
             print("{\"status\":\"ok\",\"path\":\"\(output.path)\",\"duration\":\(duration)}")

@@ -1,6 +1,14 @@
 import AppKit
 import Foundation
 
+/// What the manifest records about the video (quality preset and actual size).
+struct VideoFacts {
+    var quality: Quality
+    var width: Int
+    var height: Int
+    var fps: Int
+}
+
 /// The part of `watch-mcp finalize --json` output the app uses.
 struct FinalizeJSON: Decodable {
     let status: String
@@ -46,8 +54,8 @@ enum Handoff {
     }
 
     /// Writes manifest.json and timeline.json (input events only; watch-mcp adds speech and keyframes).
-    static func writeBundle(_ bundle: URL, createdAt: Date, duration: Double, events: [[String: Any]]) throws {
-        let manifest: [String: Any] = [
+    static func writeBundle(_ bundle: URL, createdAt: Date, duration: Double, video: VideoFacts? = nil, events: [[String: Any]]) throws {
+        var manifest: [String: Any] = [
             "format": "watch-bundle",
             "version": 1,
             "video": "video.mov",
@@ -55,6 +63,13 @@ enum Handoff {
             "duration": duration,
             "recorder": ["name": "WatchRecorder", "version": appVersion],
         ]
+        if let video {
+            // "quality" also tells watch-mcp how many keyframes to show by default.
+            manifest["quality"] = video.quality.rawValue
+            manifest["width"] = video.width
+            manifest["height"] = video.height
+            manifest["fps"] = video.fps
+        }
         let timeline: [String: Any] = ["version": 1, "events": events]
         try json(manifest).write(to: bundle.appendingPathComponent("manifest.json"), options: .atomic)
         try json(timeline).write(to: bundle.appendingPathComponent("timeline.json"), options: .atomic)
@@ -71,11 +86,17 @@ enum Handoff {
         }
     }
 
-    /// Returns the last stdout line (progress goes to stderr).
-    private static func runWatchMcp(_ arguments: [String], path: String, timeout: TimeInterval) async throws -> String {
+    /// Runs a watch-mcp command whose arguments are fixed strings (no user input) and returns
+    /// its last stdout line, e.g. `install --dry-run --json`.
+    static func watchMcp(_ arguments: [String], timeout: TimeInterval = 120) async throws -> String {
+        try await runWatchMcp(arguments, path: nil, timeout: timeout)
+    }
+
+    /// Returns the last stdout line (progress goes to stderr). `path`, when given, is "$1".
+    private static func runWatchMcp(_ arguments: [String], path: String?, timeout: TimeInterval) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lc", "\(Settings.watchMcpCommand) \(arguments.joined(separator: " "))", "watch-recorder", path]
+        process.arguments = ["-lc", "\(Settings.watchMcpCommand) \(arguments.joined(separator: " "))", "watch-recorder"] + (path.map { [$0] } ?? [])
         let stdout = Pipe()
         let stderr = Pipe()
         process.standardOutput = stdout

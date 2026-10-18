@@ -8,6 +8,8 @@
 	<string>WatchRecorder</string>
 	<key>CFBundleDisplayName</key>
 	<string>WatchRecorder</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleExecutable</key>
 	<string>WatchRecorder</string>
 	<key>CFBundlePackageType</key>

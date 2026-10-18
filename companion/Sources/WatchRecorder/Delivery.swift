@@ -2,52 +2,108 @@ import AppKit
 import ApplicationServices
 import Carbon
 
-/// After a recording, brings Claude to the front and pastes the prompt (⌘V) into its message
-/// box, the way dictation apps paste text. Pasting into another app needs the Accessibility
-/// permission; without it the prompt stays on the clipboard.
-@MainActor
-enum AutoPaste {
-    static let claudeBundleID = "com.anthropic.claudefordesktop"
+/// Apps where people talk to an AI: the desktop apps and the editors and terminals that run
+/// Claude Code or Codex. The recording is handed to the one you were using.
+enum AIApps {
+    static let claude = "com.anthropic.claudefordesktop"
+    static let codex = "com.openai.codex"
+    static let bundleIDs: [String] = [
+        claude,
+        codex,
+        "com.openai.chat",
+        "com.todesktop.230313mzl4w4u92", // Cursor
+        "com.microsoft.VSCode",
+        "com.apple.Terminal",
+        "com.googlecode.iterm2",
+        "dev.warp.Warp-Stable",
+        "com.mitchellh.ghostty",
+    ]
 
+    static func isKnown(_ app: NSRunningApplication?) -> Bool {
+        guard let id = app?.bundleIdentifier else { return false }
+        return bundleIDs.contains(id)
+    }
+}
+
+/// Remembers which AI app was used last, so a recording made while showing another app
+/// still goes back to the conversation you came from.
+@MainActor
+final class AppTracker {
+    private(set) var lastAIApp: NSRunningApplication?
+    private var observer: NSObjectProtocol?
+
+    func start() {
+        if AIApps.isKnown(NSWorkspace.shared.frontmostApplication) { lastAIApp = NSWorkspace.shared.frontmostApplication }
+        observer = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            MainActor.assumeIsolated {
+                if AIApps.isKnown(app) { self?.lastAIApp = app }
+            }
+        }
+    }
+}
+
+/// Hands the prompt over after a recording: the prompt goes on the clipboard, the AI app you
+/// were using comes back to the front on its current conversation (no permission needed), and,
+/// only if you turned on "Paste automatically" and allowed Accessibility, ⌘V is pressed for you.
+/// It never shows a permission dialog by itself.
+@MainActor
+enum Delivery {
     enum Outcome: Equatable {
-        case pasted(into: String)
-        case needsAccessibility
+        case opened(app: String, pasted: Bool)
         case copiedOnly(reason: String?)
     }
 
-    /// `frontmostAtStop`: the app in front when the recording stopped (for PasteInto = frontmost).
-    static func deliver(frontmostAtStop: NSRunningApplication?) async -> Outcome {
-        let setting = Settings.pasteInto
-        if setting == "off" { return .copiedOnly(reason: nil) }
-        let target: NSRunningApplication?
-        switch setting {
-        case "frontmost": target = frontmostAtStop
-        case "claude": target = NSRunningApplication.runningApplications(withBundleIdentifier: claudeBundleID).first
-        default: target = NSRunningApplication.runningApplications(withBundleIdentifier: setting).first
+    static func deliver(frontmostAtStop: NSRunningApplication?, lastAIApp: NSRunningApplication?) async -> Outcome {
+        guard let target = resolveTarget(frontmostAtStop: frontmostAtStop, lastAIApp: lastAIApp) else {
+            let off = Settings.sendTo == "off"
+            return .copiedOnly(reason: off ? nil : L.t("no Claude or Codex window open", "aucune app Claude ou Codex ouverte", "열려 있는 Claude나 Codex 창이 없어요"))
         }
-        guard let target, let url = target.bundleURL else {
-            return .copiedOnly(reason: L.t("Claude is not open", "Claude n'est pas ouvert"))
-        }
-        guard AXIsProcessTrusted() else {
-            // Shows the system dialog (once); the user turns WatchRecorder on in Accessibility.
-            _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
-            return .needsAccessibility
-        }
-        // Opening a running app brings it to the front like a Dock click, which macOS allows
-        // from a background app (a plain activate() may be ignored).
+        let name = target.localizedName ?? "Claude"
+        guard let url = target.bundleURL else { return .copiedOnly(reason: nil) }
+        // Opening a running app brings it to the front like a Dock click, on the conversation it
+        // was showing. macOS allows this from a background app without any permission.
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
         _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+        guard Settings.autoPaste, AXIsProcessTrusted() else { return .opened(app: name, pasted: false) }
         for _ in 0..<30 where NSWorkspace.shared.frontmostApplication?.processIdentifier != target.processIdentifier {
             try? await Task.sleep(for: .milliseconds(50))
         }
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier else {
-            return .copiedOnly(reason: L.t("could not bring \(target.localizedName ?? "the app") to the front", "impossible d'afficher \(target.localizedName ?? "l'app")"))
+            return .opened(app: name, pasted: false)
         }
         // Let the app restore focus to its text field before pasting.
         try? await Task.sleep(for: .milliseconds(250))
         pressCommandV()
-        return .pasted(into: target.localizedName ?? "Claude")
+        return .opened(app: name, pasted: true)
+    }
+
+    /// SendTo = auto: the AI app in front when you stopped, else the one you used last, else any
+    /// running one (Claude first). SendTo = claude / codex / a bundle id: that app if it runs.
+    static func resolveTarget(frontmostAtStop: NSRunningApplication?, lastAIApp: NSRunningApplication?) -> NSRunningApplication? {
+        let running = { (id: String) in NSRunningApplication.runningApplications(withBundleIdentifier: id).first }
+        switch Settings.sendTo {
+        case "off": return nil
+        case "claude": return running(AIApps.claude)
+        case "codex": return running(AIApps.codex)
+        case "auto":
+            if AIApps.isKnown(frontmostAtStop) { return frontmostAtStop }
+            if let lastAIApp, !lastAIApp.isTerminated { return lastAIApp }
+            return AIApps.bundleIDs.lazy.compactMap(running).first
+        case let bundleID: return running(bundleID)
+        }
+    }
+
+    /// Turning on automatic pasting is the only moment WatchRecorder asks for Accessibility.
+    static func enableAutoPaste() {
+        Settings.autoPaste = true
+        if !AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary),
+           let url = SettingsPane.accessibility.url {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     /// Posts ⌘V. kVK_ANSI_V is a key position, the same on QWERTY and AZERTY.

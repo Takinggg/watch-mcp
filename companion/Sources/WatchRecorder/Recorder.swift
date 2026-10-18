@@ -12,7 +12,7 @@ enum RecorderError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noDisplay: "No display to record."
-        case .noPermission: L.t("WatchRecorder needs Screen Recording permission (System Settings > Privacy & Security > Screen & System Audio Recording).", "WatchRecorder a besoin de la permission Enregistrement de l'écran (Réglages Système > Confidentialité et sécurité > Enregistrement de l'écran et de l'audio système).")
+        case .noPermission: L.t("WatchRecorder needs Screen Recording permission (System Settings > Privacy & Security > Screen & System Audio Recording).", "WatchRecorder a besoin de la permission Enregistrement de l'écran (Réglages Système > Confidentialité et sécurité > Enregistrement de l'écran et de l'audio système).", "WatchRecorder에 화면 녹화 권한이 필요해요(시스템 설정 > 개인정보 보호 및 보안 > 화면 및 시스템 오디오 녹화).")
         case .notRecording: "Not recording."
         case .finishTimedOut: "The recording did not finish writing in time."
         }
@@ -48,10 +48,11 @@ final class Recorder: NSObject {
     private let sink = FirstFrameClock()
     private let sinkQueue = DispatchQueue(label: "io.github.takinggg.watchrecorder.sink")
 
-    /// Longest edge of the recording in pixels: sharp enough to read text, light enough to process.
-    static let maxLongEdge = 2560.0
+    /// Size and frame rate of the current recording (written to the bundle manifest).
+    private(set) var videoSize = CGSize.zero
+    private(set) var fps: Int32 = 30
 
-    func start(target: CaptureTarget, microphone: Bool, to url: URL) async throws {
+    func start(target: CaptureTarget, microphone: Bool, quality: Quality, to url: URL) async throws {
         guard CGPreflightScreenCaptureAccess() else {
             // Shows the system prompt the first time; the user then enables the app in System Settings.
             CGRequestScreenCaptureAccess()
@@ -63,10 +64,12 @@ final class Recorder: NSObject {
         sink.reset()
 
         let config = SCStreamConfiguration()
-        let factor = min(1.0, Recorder.maxLongEdge / max(pointSize.width * scale, pointSize.height * scale))
+        let factor = min(1.0, quality.maxLongEdge / max(pointSize.width * scale, pointSize.height * scale))
         config.width = Recorder.even(pointSize.width * scale * factor)
         config.height = Recorder.even(pointSize.height * scale * factor)
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+        config.minimumFrameInterval = CMTime(value: 1, timescale: quality.fps)
+        videoSize = CGSize(width: config.width, height: config.height)
+        fps = quality.fps
         config.showsCursor = true
         config.queueDepth = 6
         config.capturesAudio = false

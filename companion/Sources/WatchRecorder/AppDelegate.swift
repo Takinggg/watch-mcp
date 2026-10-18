@@ -16,6 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let eventLog = EventLog()
     private let hud = HUDController()
     private let onboarding = OnboardingController()
+    private lazy var dashboard = DashboardController(onboarding: onboarding)
+    private let tracker = AppTracker()
     private var bundleURL: URL?
     private var recordingHostStart = 0.0
     private var hotKey: HotKey?
@@ -29,6 +31,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        tracker.start()
+        NotificationCenter.default.addObserver(forName: .watchRecorderLanguageChanged, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
         let spec = Settings.hotKey
         hotKey = HotKey(spec) { [weak self] in self?.toggle() }
         log.info("launched; shortcut \(spec.display, privacy: .public) \(self.hotKey == nil ? "NOT registered" : "registered", privacy: .public); watch-mcp command: \(Settings.watchMcpCommand, privacy: .public)")
@@ -39,25 +45,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let url = pane.url { NSWorkspace.shared.open(url) }
         }
         if hotKey == nil {
-            show(L.t("\(spec.display) is used by another app. Pick another shortcut (see README).", "\(spec.display) est déjà pris par une autre app. Choisis un autre raccourci (voir README)."), seconds: 30)
-            hud.show(.problem(L.t("Shortcut \(spec.display) is taken by another app", "Raccourci \(spec.display) déjà pris par une autre app"), settings: nil), hideAfter: 8)
+            show(L.t("\(spec.display) is used by another app. Pick another shortcut (see README).", "\(spec.display) est déjà pris par une autre app. Choisis un autre raccourci (voir README).", "\(spec.display)는 다른 앱이 쓰고 있어요. 다른 단축키를 골라 주세요(README 참고)."), seconds: 30)
+            hud.show(.problem(L.t("Shortcut \(spec.display) is taken by another app", "Raccourci \(spec.display) déjà pris par une autre app", "단축키 \(spec.display)를 다른 앱이 쓰고 있어요"), settings: nil), hideAfter: 8)
+        } else if let resume = Settings.onboardingResumeStep.flatMap(OnboardingStep.init(rawValue:)) {
+            // The app relaunched itself during setup (screen recording applies at launch).
+            Settings.onboardingResumeStep = nil
+            onboarding.show(at: resume)
         } else if !CGPreflightScreenCaptureAccess() {
-            // New user (or permission removed): walk through the permissions.
-            onboarding.show()
+            // New user (or permission removed): walk through the setup.
+            onboarding.show(at: .welcome)
         } else {
             // A short hello so the user sees the app is there and knows the shortcut.
-            hud.show(.done(L.t("WatchRecorder is ready: press \(spec.display) to record", "WatchRecorder est prêt : \(spec.display) pour enregistrer")), hideAfter: 4)
+            hud.show(.done(L.t("WatchRecorder is ready: press \(spec.display) to record", "WatchRecorder est prêt : \(spec.display) pour enregistrer", "WatchRecorder 준비 완료: \(spec.display)로 녹화하세요")), hideAfter: 4)
         }
+        onboarding.changeShortcut = { [weak self] text in self?.applyHotKey(text) }
+        onboarding.openDashboard = { [weak self] in self?.dashboard.show() }
+        dashboard.model.sendToAI = { [weak self] recording in Task { await self?.send(recording) } }
+        dashboard.model.startRecording = { [weak self] in self?.toggle() }
+        dashboard.model.openSetup = { [weak self] in self?.onboarding.show(at: .welcome) }
         recorder.onUnexpectedStop = { [weak self] error in
             log.error("capture stopped unexpectedly: \(error.localizedDescription, privacy: .public)")
             self?.phase = .idle
-            self?.show(L.t("Recording stopped: ", "Enregistrement arrêté : ") + error.localizedDescription)
-            self?.hud.show(.problem(L.t("Recording stopped", "Enregistrement arrêté"), settings: nil), hideAfter: 6)
+            self?.show(L.t("Recording stopped: ", "Enregistrement arrêté : ", "녹화가 멈췄어요: ") + error.localizedDescription)
+            self?.hud.show(.problem(L.t("Recording stopped", "Enregistrement arrêté", "녹화가 멈췄어요"), settings: nil), hideAfter: 6)
         }
         refresh()
     }
 
     @objc func toggle() {
+        if onboarding.consumesShortcut {
+            onboarding.shortcutPressed()
+            return
+        }
         switch phase {
         case .idle: Task { await startRecording() }
         case .recording: Task { await stopRecording() }
@@ -71,13 +90,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         micInUse = Settings.recordMicrophone
         if micInUse, !(await AVCaptureDevice.requestAccess(for: .audio)) {
             micInUse = false
-            show(L.t("Microphone access is off: recording the screen only.", "Micro non autorisé : seulement l'écran est enregistré."))
+            show(L.t("Microphone access is off: recording the screen only.", "Micro non autorisé : seulement l'écran est enregistré.", "마이크 권한이 없어요. 화면만 녹화해요."))
         }
         do {
             let bundle = try Handoff.newBundle()
             bundleURL = bundle
             recordingHostStart = EventLog.hostNow()
-            try await recorder.start(target: .displayUnderMouse, microphone: micInUse, to: Handoff.videoURL(in: bundle))
+            try await recorder.start(target: .displayUnderMouse, microphone: micInUse, quality: Settings.quality, to: Handoff.videoURL(in: bundle))
             eventLog.start(displayFrame: recorder.capturedFrame)
             log.info("recording started (microphone: \(self.micInUse, privacy: .public))")
             phase = .recording
@@ -88,7 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             autoStop = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(limit * 60))
                 guard !Task.isCancelled, let self, self.phase == .recording else { return }
-                self.show(L.t("Stopped after \(Int(limit)) min (MaxMinutes).", "Arrêté au bout de \(Int(limit)) min (MaxMinutes)."))
+                self.show(L.t("Stopped after \(Int(limit)) min (MaxMinutes).", "Arrêté au bout de \(Int(limit)) min (MaxMinutes).", "\(Int(limit))분이 지나 자동으로 멈췄어요(MaxMinutes)."))
                 await self.stopRecording()
             }
         } catch {
@@ -97,10 +116,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             removeIfEmpty(bundleURL)
             show(error.localizedDescription, seconds: 20)
             if case RecorderError.noPermission = error {
-                hud.show(.problem(L.t("Allow WatchRecorder to record the screen, then reopen it", "Autorise WatchRecorder à enregistrer l'écran, puis relance-le"), settings: .screenRecording), hideAfter: 20)
-                onboarding.show()
+                hud.show(.problem(L.t("Allow WatchRecorder to record the screen, then reopen it", "Autorise WatchRecorder à enregistrer l'écran, puis relance-le", "WatchRecorder의 화면 녹화를 허용한 뒤 다시 열어 주세요"), settings: .screenRecording), hideAfter: 20)
+                onboarding.show(at: .screen)
             } else {
-                hud.show(.problem(L.t("Could not start: ", "Impossible de démarrer : ") + error.localizedDescription, settings: nil), hideAfter: 8)
+                hud.show(.problem(L.t("Could not start: ", "Impossible de démarrer : ", "시작할 수 없어요: ") + error.localizedDescription, settings: nil), hideAfter: 8)
             }
         }
     }
@@ -120,15 +139,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         phase = .finishing
         let frontmostAtStop = NSWorkspace.shared.frontmostApplication
         hud.stopMeter()
-        hud.show(.working(L.t("Saving…", "Enregistrement du fichier…")))
+        hud.show(.working(L.t("Saving…", "Enregistrement du fichier…", "저장하는 중…")))
         let recorded = eventLog.stop()
         do {
             let duration = try await recorder.stop()
             // t = 0 is the first video frame; events before it are clamped to 0.
             let videoStart = recorder.videoStartHostTime ?? recordingHostStart
-            try Handoff.writeBundle(bundle, createdAt: startedAt, duration: duration, events: recorded.map { $0.json(videoStart: videoStart) })
+            let video = VideoFacts(quality: Settings.quality, width: Int(recorder.videoSize.width), height: Int(recorder.videoSize.height), fps: Int(recorder.fps))
+            try Handoff.writeBundle(bundle, createdAt: startedAt, duration: duration, video: video, events: recorded.map { $0.json(videoStart: videoStart) })
             phase = .transcribing
-            hud.show(.working(micInUse ? L.t("Transcribing your voice…", "Transcription de ta voix…") : L.t("Preparing for Claude…", "Préparation pour Claude…")))
+            hud.show(.working(micInUse ? L.t("Transcribing your voice…", "Transcription de ta voix…", "음성을 받아쓰는 중…") : L.t("Preparing for Claude…", "Préparation pour Claude…", "Claude에 보낼 준비 중…")))
             var transcript: String?
             do {
                 let result = try await Handoff.finalize(bundle)
@@ -143,25 +163,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Handoff.copyToClipboard(prompt)
             log.info("recording saved (\(Int(duration), privacy: .public) s, \(recorded.count, privacy: .public) events); prompt copied")
             lastPrompt = prompt
+            onboarding.recordingFinished(summary: transcript.flatMap { $0.isEmpty ? nil : $0 } ?? L.t("(no speech)", "(sans parole)", "(음성 없음)"))
+            dashboard.reload()
             phase = .idle
             NSSound(named: "Glass")?.play()
-            let outcome = await AutoPaste.deliver(frontmostAtStop: frontmostAtStop)
-            log.info("paste: \(String(describing: outcome), privacy: .public)")
+            let outcome = await Delivery.deliver(frontmostAtStop: frontmostAtStop, lastAIApp: tracker.lastAIApp)
+            log.info("delivery: \(String(describing: outcome), privacy: .public)")
             switch outcome {
-            case let .pasted(app):
-                hud.show(.done(L.t("Pasted into \(app): check it and send", "Collé dans \(app) : vérifie et envoie")), hideAfter: 4)
-            case .needsAccessibility:
-                hud.show(.problem(L.t("To paste by itself, allow WatchRecorder in Accessibility (prompt copied: ⌘V)", "Pour coller tout seul, autorise WatchRecorder dans Accessibilité (prompt copié : ⌘V)"), settings: .accessibility), hideAfter: 15)
+            case let .opened(app, true):
+                hud.show(.done(L.t("Pasted into \(app): check it and send", "Collé dans \(app) : vérifie et envoie", "\(app)에 붙여 넣었어요. 확인하고 보내세요")), hideAfter: 4)
+            case let .opened(app, false):
+                hud.show(.done(L.t("Prompt ready in \(app): ⌘V then Enter", "Prompt prêt dans \(app) : ⌘V puis Entrée", "\(app)에 프롬프트 준비 완료: ⌘V 후 Enter")), hideAfter: 6)
             case let .copiedOnly(reason):
-                let base = L.t("Prompt copied: paste it into Claude (⌘V)", "Prompt copié : colle-le dans Claude (⌘V)")
-                hud.show(.done(reason.map { "\(base) · \($0)" } ?? base), hideAfter: 5)
+                let base = L.t("Prompt copied: ⌘V in Claude or Codex", "Prompt copié : ⌘V dans Claude ou Codex", "프롬프트를 복사했어요. Claude나 Codex에서 ⌘V")
+                hud.show(.done(reason.map { "\(base) · \($0)" } ?? base), hideAfter: 6)
             }
         } catch {
             log.error("could not save the recording: \(error.localizedDescription, privacy: .public)")
             phase = .idle
-            show(L.t("Could not save the recording: ", "Impossible d'enregistrer le fichier : ") + error.localizedDescription, seconds: 20)
-            hud.show(.problem(L.t("Could not save the recording", "Impossible d'enregistrer le fichier"), settings: nil), hideAfter: 8)
+            show(L.t("Could not save the recording: ", "Impossible d'enregistrer le fichier : ", "녹화를 저장할 수 없어요: ") + error.localizedDescription, seconds: 20)
+            hud.show(.problem(L.t("Could not save the recording", "Impossible d'enregistrer le fichier", "녹화를 저장할 수 없어요"), settings: nil), hideAfter: 8)
         }
+    }
+
+    /// Re-registers the global shortcut (from the setup guide or the settings).
+    private func applyHotKey(_ text: String) {
+        hotKey?.unregister()
+        Settings.setHotKey(text)
+        let spec = Settings.hotKey
+        hotKey = HotKey(spec) { [weak self] in self?.toggle() }
+        hud.model.shortcut = spec.display
+        log.info("shortcut changed to \(spec.display, privacy: .public) (\(self.hotKey == nil ? "NOT registered" : "registered", privacy: .public))")
+        refresh()
+    }
+
+    /// "Send to my AI" from the library: same hand-over as at the end of a recording.
+    private func send(_ recording: Recording) async {
+        let transcript = recording.lines.isEmpty ? nil : recording.transcript
+        try? Handoff.publishLatest(path: recording.url, startedAt: recording.createdAt, duration: recording.duration, transcript: transcript)
+        Handoff.copyToClipboard(Handoff.prompt(recording: recording.url, duration: recording.duration, transcript: transcript))
+        switch await Delivery.deliver(frontmostAtStop: nil, lastAIApp: tracker.lastAIApp) {
+        case let .opened(app, true): hud.show(.done(L.t("Pasted into \(app)", "Collé dans \(app)", "\(app)에 붙여 넣었어요")), hideAfter: 4)
+        case let .opened(app, false): hud.show(.done(L.t("Prompt ready in \(app): ⌘V then Enter", "Prompt prêt dans \(app) : ⌘V puis Entrée", "\(app)에 프롬프트 준비 완료: ⌘V 후 Enter")), hideAfter: 6)
+        case .copiedOnly: hud.show(.done(L.t("Prompt copied (⌘V)", "Prompt copié (⌘V)", "프롬프트를 복사했어요(⌘V)")), hideAfter: 5)
+        }
+    }
+
+    @objc private func openDashboard() {
+        dashboard.show()
     }
 
     /// Double-clicking a .watch bundle opens its video.
@@ -193,28 +242,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let shortcut = Settings.hotKey.display
         let status: String
         switch phase {
-        case .idle: status = L.t("Ready. Press \(shortcut) to record.", "Prêt. \(shortcut) pour enregistrer.")
-        case .starting: status = L.t("Starting…", "Démarrage…")
-        case .recording: status = L.t("Recording \(elapsed()). Press \(shortcut) to stop.", "Enregistrement \(elapsed()). \(shortcut) pour arrêter.")
-        case .finishing: status = L.t("Saving…", "Enregistrement du fichier…")
-        case .transcribing: status = L.t("Transcribing your voice…", "Transcription de ta voix…")
+        case .idle: status = L.t("Ready. Press \(shortcut) to record.", "Prêt. \(shortcut) pour enregistrer.", "준비됐어요. \(shortcut)로 녹화하세요.")
+        case .starting: status = L.t("Starting…", "Démarrage…", "시작하는 중…")
+        case .recording: status = L.t("Recording \(elapsed()). Press \(shortcut) to stop.", "Enregistrement \(elapsed()). \(shortcut) pour arrêter.", "녹화 중 \(elapsed()). \(shortcut)로 멈추세요.")
+        case .finishing: status = L.t("Saving…", "Enregistrement du fichier…", "저장하는 중…")
+        case .transcribing: status = L.t("Transcribing your voice…", "Transcription de ta voix…", "음성을 받아쓰는 중…")
         }
         menu.addItem(disabled(notice ?? status))
         menu.addItem(.separator())
-        let toggleTitle = phase == .recording ? L.t("Stop Recording", "Arrêter l'enregistrement") : L.t("Start Recording", "Démarrer l'enregistrement")
+        menu.addItem(item(L.t("Open WatchRecorder", "Ouvrir WatchRecorder", "WatchRecorder 열기"), #selector(openDashboard)))
+        let toggleTitle = phase == .recording ? L.t("Stop Recording", "Arrêter l'enregistrement", "녹화 멈추기") : L.t("Start Recording", "Démarrer l'enregistrement", "녹화 시작")
         let toggleItem = NSMenuItem(title: "\(toggleTitle)  (\(shortcut))", action: #selector(toggle), keyEquivalent: "")
         toggleItem.target = self
         toggleItem.isEnabled = phase == .idle || phase == .recording
         menu.addItem(toggleItem)
-        menu.addItem(item(L.t("Copy Last Prompt", "Copier le dernier prompt"), #selector(copyLastPrompt), enabled: lastPrompt != nil))
-        menu.addItem(item(L.t("Show Recordings in Finder", "Afficher les enregistrements"), #selector(showRecordings)))
-        menu.addItem(item(L.t("Permissions and Setup…", "Permissions et installation…"), #selector(showOnboarding)))
+        menu.addItem(item(L.t("Copy Last Prompt", "Copier le dernier prompt", "마지막 프롬프트 복사"), #selector(copyLastPrompt), enabled: lastPrompt != nil))
+        menu.addItem(item(L.t("Show Recordings in Finder", "Afficher les enregistrements", "Finder에서 녹화 보기"), #selector(showRecordings)))
+        menu.addItem(item(L.t("Permissions and Setup…", "Permissions et installation…", "권한 및 설정…"), #selector(showOnboarding)))
         menu.addItem(.separator())
-        let mic = item(L.t("Record Microphone", "Enregistrer le micro"), #selector(toggleMicrophone))
+        let mic = item(L.t("Record Microphone", "Enregistrer le micro", "마이크 녹음"), #selector(toggleMicrophone))
         mic.state = Settings.recordMicrophone ? .on : .off
         menu.addItem(mic)
+        menu.addItem(sendToMenu())
+        let paste = item(L.t("Paste Automatically (⌘V)", "Coller automatiquement (⌘V)", "자동으로 붙여넣기(⌘V)"), #selector(toggleAutoPaste))
+        paste.state = Settings.autoPaste ? .on : .off
+        menu.addItem(paste)
         menu.addItem(.separator())
-        menu.addItem(item(L.t("Quit WatchRecorder", "Quitter WatchRecorder"), #selector(quit)))
+        menu.addItem(item(L.t("Quit WatchRecorder", "Quitter WatchRecorder", "WatchRecorder 종료"), #selector(quit)))
         return menu
     }
 
@@ -240,8 +294,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.open(folder)
     }
 
+    private func sendToMenu() -> NSMenuItem {
+        let parent = NSMenuItem(title: L.t("Send To", "Envoyer vers", "보낼 곳"), action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        let choices: [(String, String)] = [
+            ("auto", L.t("Auto (the AI app you were using)", "Auto (l'app d'IA que tu utilisais)", "자동(사용하던 AI 앱)")),
+            ("claude", "Claude"),
+            ("codex", "ChatGPT / Codex"),
+            ("off", L.t("Clipboard only", "Presse-papiers seulement", "클립보드만")),
+        ]
+        for (value, title) in choices {
+            let choice = NSMenuItem(title: title, action: #selector(chooseSendTo(_:)), keyEquivalent: "")
+            choice.target = self
+            choice.representedObject = value
+            choice.state = Settings.sendTo == value ? .on : .off
+            submenu.addItem(choice)
+        }
+        parent.submenu = submenu
+        return parent
+    }
+
+    @objc private func chooseSendTo(_ sender: NSMenuItem) {
+        if let value = sender.representedObject as? String { Settings.sendTo = value }
+        refresh()
+    }
+
+    @objc private func toggleAutoPaste() {
+        if Settings.autoPaste {
+            Settings.autoPaste = false
+        } else {
+            Delivery.enableAutoPaste()
+        }
+        refresh()
+    }
+
     @objc private func showOnboarding() {
-        onboarding.show()
+        onboarding.show(at: .welcome)
     }
 
     @objc private func toggleMicrophone() {

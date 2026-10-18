@@ -1,10 +1,68 @@
 import AppKit
 import SwiftUI
 
-/// Strings in French when the system prefers French, English otherwise.
+/// Interface languages. "auto" follows the Mac's preferred languages.
+enum AppLanguage: String, CaseIterable, Identifiable {
+    case auto, en, fr, ko
+
+    var id: String { rawValue }
+
+    /// Names shown in the language picker, each in its own language.
+    var name: String {
+        switch self {
+        case .auto: L.t("Same as the Mac", "Comme le Mac", "Mac 설정과 같게")
+        case .en: "English"
+        case .fr: "Français"
+        case .ko: "한국어"
+        }
+    }
+}
+
+/// Picks the English, French or Korean version of a string, following the language setting.
 enum L {
-    static let french = Locale.preferredLanguages.first?.hasPrefix("fr") ?? false
-    static func t(_ en: String, _ fr: String) -> String { french ? fr : en }
+    /// Forces a language for `--render-ui` screenshots, without touching the user's setting.
+    /// Only set once at startup of that mode, before any UI exists.
+    nonisolated(unsafe) static var override: AppLanguage?
+
+    static var current: AppLanguage {
+        if let override { return override }
+        let chosen = AppLanguage(rawValue: Settings.defaults.string(forKey: "AppLanguage") ?? "") ?? .auto
+        if chosen != .auto { return chosen }
+        for preferred in Locale.preferredLanguages {
+            if preferred.hasPrefix("fr") { return .fr }
+            if preferred.hasPrefix("ko") { return .ko }
+            if preferred.hasPrefix("en") { return .en }
+        }
+        return .en
+    }
+
+    /// Locale for dates and numbers, matching the interface language.
+    static var locale: Locale {
+        switch current {
+        case .en: Locale(identifier: "en_US")
+        case .fr: Locale(identifier: "fr_FR")
+        case .ko: Locale(identifier: "ko_KR")
+        case .auto: Locale.current
+        }
+    }
+
+    /// A date formatted in the interface language.
+    static func date(_ date: Date, date dateStyle: Date.FormatStyle.DateStyle, time: Date.FormatStyle.TimeStyle) -> String {
+        date.formatted(Date.FormatStyle(date: dateStyle, time: time).locale(locale))
+    }
+
+    static func t(_ en: String, _ fr: String, _ ko: String) -> String {
+        switch current {
+        case .fr: fr
+        case .ko: ko
+        case .en, .auto: en
+        }
+    }
+}
+
+extension Notification.Name {
+    /// Posted when the interface language changes, so open windows redraw.
+    static let watchRecorderLanguageChanged = Notification.Name("WatchRecorderLanguageChanged")
 }
 
 /// What the floating pill shows.
@@ -20,12 +78,15 @@ enum HUDState: Equatable {
 /// System Settings panes the pill can open.
 enum SettingsPane: Equatable {
     case screenRecording
+    case microphone
     case accessibility
 
     var url: URL? {
+        let base = "x-apple.systempreferences:com.apple.preference.security?"
         switch self {
-        case .screenRecording: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
-        case .accessibility: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        case .screenRecording: return URL(string: base + "Privacy_ScreenCapture")
+        case .microphone: return URL(string: base + "Privacy_Microphone")
+        case .accessibility: return URL(string: base + "Privacy_Accessibility")
         }
     }
 }
@@ -161,19 +222,19 @@ struct HUDView: View {
             EmptyView()
         case .starting:
             ProgressView().controlSize(.small).tint(.white)
-            Text(L.t("Starting…", "Démarrage…")).font(.system(size: 13, weight: .medium))
+            Text(L.t("Starting…", "Démarrage…", "시작하는 중…")).font(.system(size: 13, weight: .medium))
         case let .recording(since, microphone):
             Button(action: model.onStop) {
                 HStack(spacing: 10) {
                     PulsingDot()
-                    if microphone { Bars(levels: model.levels) } else { Text(L.t("no mic", "sans micro")).font(.system(size: 11)).opacity(0.7) }
+                    if microphone { Bars(levels: model.levels) } else { Text(L.t("no mic", "sans micro", "마이크 없음")).font(.system(size: 11)).opacity(0.7) }
                     Text(since, style: .timer).font(.system(size: 13, weight: .semibold).monospacedDigit())
                     Text(model.shortcut).font(.system(size: 11, weight: .medium)).opacity(0.6)
                     Image(systemName: "stop.fill").font(.system(size: 11)).opacity(0.85)
                 }
             }
             .buttonStyle(.plain)
-            .help(L.t("Stop recording", "Arrêter l'enregistrement"))
+            .help(L.t("Stop recording", "Arrêter l'enregistrement", "녹화 멈추기"))
         case let .working(text):
             ProgressView().controlSize(.small).tint(.white)
             Text(text).font(.system(size: 13, weight: .medium))
@@ -184,7 +245,7 @@ struct HUDView: View {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
             Text(text).font(.system(size: 12, weight: .medium)).lineLimit(1)
             if let pane {
-                Button(L.t("Open Settings", "Ouvrir les Réglages")) { model.onOpenSettings(pane) }
+                Button(L.t("Open Settings", "Ouvrir les Réglages", "설정 열기")) { model.onOpenSettings(pane) }
                     .buttonStyle(.borderedProminent).controlSize(.small)
             }
         }

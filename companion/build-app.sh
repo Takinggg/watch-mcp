@@ -9,6 +9,8 @@ BIN="$(swift build -c release --package-path "$HERE" --show-bin-path)/WatchRecor
 mkdir -p "$APP/Contents/MacOS"
 cp "$BIN" "$APP/Contents/MacOS/WatchRecorder"
 cp "$HERE/Resources/Info.plist" "$APP/Contents/Info.plist"
+mkdir -p "$APP/Contents/Resources"
+cp "$HERE/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 # Signing identity, in this order:
 #   1. WATCHRECORDER_SIGN_IDENTITY (any code-signing certificate in your keychains);
 #   2. the local identity made by make-signing-identity.sh, once trusted for code signing (README);

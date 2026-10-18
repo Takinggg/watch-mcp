@@ -1,3 +1,4 @@
+import AppKit
 import Carbon
 import Foundation
 import Testing
@@ -102,5 +103,66 @@ import Testing
         }
         #expect(keys.events[1].kind == .shortcut(modifiers: ["cmd"]))
         if case let .typing(_, count) = keys.events[2].kind { #expect(count == 1) } else { Issue.record("expected a typing burst") }
+    }
+}
+
+@Suite(.serialized) @MainActor struct DeliveryTests {
+    @Test func sendToDefaultsToAutoAndPastingIsOptIn() {
+        let saved = (Settings.defaults.object(forKey: "SendTo"), Settings.defaults.object(forKey: "AutoPaste"))
+        defer {
+            Settings.defaults.set(saved.0, forKey: "SendTo")
+            Settings.defaults.set(saved.1, forKey: "AutoPaste")
+        }
+        Settings.defaults.removeObject(forKey: "SendTo")
+        Settings.defaults.removeObject(forKey: "AutoPaste")
+        #expect(Settings.sendTo == "auto")
+        #expect(Settings.autoPaste == false)
+    }
+
+    @Test func clipboardOnlyNeverPicksAnApp() {
+        let saved = Settings.defaults.object(forKey: "SendTo")
+        defer { Settings.defaults.set(saved, forKey: "SendTo") }
+        Settings.sendTo = "off"
+        #expect(Delivery.resolveTarget(frontmostAtStop: NSRunningApplication.current, lastAIApp: NSRunningApplication.current) == nil)
+    }
+
+    @Test func onlyAIAppsAndTerminalsAreTargets() {
+        #expect(AIApps.isKnown(NSRunningApplication.current) == false)
+        #expect(AIApps.bundleIDs.contains("com.anthropic.claudefordesktop"))
+        #expect(AIApps.bundleIDs.contains("com.openai.codex"))
+    }
+}
+
+@Suite struct QualityTests {
+    @Test func keyframesFollowTheServerRules() {
+        // Same numbers as defaultBudget in src/watch.ts.
+        #expect(Quality.light.keyframes(forSeconds: 60) == 16)
+        #expect(Quality.light.keyframes(forSeconds: 600) == 32)
+        #expect(Quality.balanced.keyframes(forSeconds: 60) == 32)
+        #expect(Quality.detailed.keyframes(forSeconds: 60) == 48)
+        #expect(Quality.detailed.keyframes(forSeconds: 3600) == 128)
+    }
+
+    @Test func imageTokensAreWholeStoryboards() {
+        #expect(Quality.balanced.imageTokens(forSeconds: 60) == 2 * 2128)
+        #expect(Quality.detailed.imageTokens(forSeconds: 3600) == 8 * 2128)
+    }
+}
+
+@Suite(.serialized) @MainActor struct LanguageTests {
+    @Test func followsTheChosenLanguage() {
+        let saved = Settings.defaults.object(forKey: "AppLanguage")
+        defer { Settings.defaults.set(saved, forKey: "AppLanguage") }
+        for (language, expected) in [("en", "Record"), ("fr", "Enregistrer"), ("ko", "녹화")] {
+            Settings.defaults.set(language, forKey: "AppLanguage")
+            #expect(L.t("Record", "Enregistrer", "녹화") == expected)
+        }
+    }
+
+    @Test func autoFallsBackToALanguageWeHave() {
+        let saved = Settings.defaults.object(forKey: "AppLanguage")
+        defer { Settings.defaults.set(saved, forKey: "AppLanguage") }
+        Settings.defaults.set("auto", forKey: "AppLanguage")
+        #expect([AppLanguage.en, .fr, .ko].contains(L.current))
     }
 }
