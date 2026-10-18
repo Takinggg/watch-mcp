@@ -306,6 +306,8 @@ final class OnboardingController {
         // Checked on every visit: an AI app may have been set up or installed meanwhile.
         if model.step == .connect { Task { await refreshClients(install: false) } }
         if model.step == .tryIt { model.tryResult = nil }
+        // Keeping the recommended preset is a choice too: save it so it is not asked again.
+        if model.step == .quality { Settings.quality = model.quality }
     }
 
     func startMic() {

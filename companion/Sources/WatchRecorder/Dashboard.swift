@@ -29,6 +29,13 @@ final class DashboardController {
 
     init(onboarding: OnboardingController) {
         self.onboarding = onboarding
+        // Back from System Settings: show the permissions as they are now.
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.window?.isVisible == true else { return }
+                self.refreshPermissions()
+            }
+        }
         NotificationCenter.default.addObserver(forName: .watchRecorderLanguageChanged, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let window = self.window else { return }
@@ -37,7 +44,14 @@ final class DashboardController {
         }
     }
 
+    /// The setup checklist reads the permissions from the setup model, which is otherwise only
+    /// filled while the setup window is open.
+    func refreshPermissions() {
+        onboarding.model.refreshPermissions()
+    }
+
     func show() {
+        refreshPermissions()
         model.library.reload()
         Task { await onboarding.refreshClients(install: false) }
         if window == nil { window = makeWindow() }
@@ -287,7 +301,7 @@ private struct SetupChecklist: View {
         return [
             (L.t("Allow screen recording", "Autoriser l'enregistrement de l'écran", "화면 녹화 허용"), model.isGranted(.screen), .screen),
             (L.t("Allow the microphone", "Autoriser le micro", "마이크 허용"), model.isGranted(.microphone), .microphone),
-            (L.t("Choose the recording quality", "Choisir la qualité d'enregistrement", "녹화 품질 선택"), Settings.defaults.object(forKey: "Quality") != nil, .quality),
+            (L.t("Choose the recording quality", "Choisir la qualité d'enregistrement", "녹화 품질 선택"), Settings.defaults.object(forKey: "Quality") != nil || Settings.setupFinished, .quality),
             (L.t("Connect your AI apps", "Brancher tes apps d'IA", "AI 앱 연결"), model.clients.contains { $0.action == "ok" }, .connect),
             (L.t("Make a first recording", "Faire un premier enregistrement", "첫 녹화 해 보기"), !library.recordings.isEmpty, .tryIt),
         ]

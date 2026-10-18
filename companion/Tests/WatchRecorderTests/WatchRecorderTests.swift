@@ -270,3 +270,19 @@ import Testing
     }
 }
 
+@Suite(.serialized) @MainActor struct ChecklistTests {
+    @Test func libraryReadsThePermissionsWithoutTheSetupWindow() {
+        let onboarding = OnboardingController()
+        #expect(onboarding.model.granted.isEmpty)
+        DashboardController(onboarding: onboarding).refreshPermissions()
+        #expect(onboarding.model.granted.count == Permission.allCases.count)
+    }
+
+    @Test func keepingTheRecommendedQualityCountsAsAChoice() {
+        let saved = Settings.defaults.object(forKey: "Quality")
+        defer { Settings.defaults.set(saved, forKey: "Quality") }
+        Settings.defaults.removeObject(forKey: "Quality")
+        OnboardingController().go(to: .quality)
+        #expect(Settings.defaults.string(forKey: "Quality") == Quality.balanced.rawValue)
+    }
+}
