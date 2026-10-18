@@ -7,6 +7,7 @@ import { getBinaries } from "./binaries.ts";
 import { dataRoot } from "./cache.ts";
 import { describeError } from "./errors.ts";
 import { finalizeBundle } from "./finalize.ts";
+import { planInstall, planUninstall, realEnv, serverCommand, type ClientId } from "./install.ts";
 import { run } from "./exec.ts";
 import { createServer } from "./server.ts";
 import { describeTranscript, getTranscript, transcriptLines } from "./transcribe.ts";
@@ -20,6 +21,11 @@ const HELP = `watch-mcp ${pkg.version}: let Claude watch local videos.
 
 Usage:
   watch-mcp                 Start the MCP server on stdio (what Claude Code / Desktop / Cursor run)
+  watch-mcp install [--dry-run] [--json] [--client claude-code,codex,claude-desktop,cursor] [--command "..."]
+                            Add watch-mcp to every AI client found here (Claude Code, Codex,
+                            Claude Desktop, Cursor). Idempotent; edited files are backed up.
+  watch-mcp uninstall [--dry-run] [--client ...]
+                            Remove it from those clients
   watch-mcp setup           Download the speech models now instead of on first use
   watch-mcp doctor          Show which ffmpeg, models and cache folder are used
   watch-mcp watch <video> [--budget N] [--out DIR]
@@ -38,6 +44,7 @@ async function main(argv: string[]): Promise<number> {
   if (command === "--help" || command === "-h" || command === "help") return print(HELP);
   if (command === "--version" || command === "-v") return print(pkg.version);
   if (command === "setup") return setup();
+  if (command === "install" || command === "uninstall") return installCommand(command, rest);
   if (command === "doctor") return doctor();
   if (command === "watch") return watchToFolder(rest);
   if (command === "transcribe") return transcribeToStdout(rest);
@@ -56,6 +63,33 @@ async function serve(): Promise<number> {
 
 function print(text: string): number {
   process.stdout.write(`${text.trimEnd()}\n`);
+  return 0;
+}
+
+function installCommand(command: "install" | "uninstall", args: string[]): number {
+  const env = realEnv();
+  const clients = valueOf(args, "--client")?.split(",").map((c) => c.trim()) as ClientId[] | undefined;
+  const valid: ClientId[] = ["claude-code", "codex", "claude-desktop", "cursor"];
+  if (clients?.some((c) => !valid.includes(c))) {
+    process.stderr.write(`--client must be one or more of: ${valid.join(", ")}\n`);
+    return 2;
+  }
+  const dryRun = args.includes("--dry-run");
+  const steps = command === "install" ? planInstall(env, serverCommand(env, valueOf(args, "--command")), clients) : planUninstall(env, clients);
+  if (args.includes("--json")) {
+    for (const step of steps) if (step.apply && !dryRun) step.apply();
+    const report = steps.map((s) => ({ client: s.client, label: s.label, action: s.action, detail: s.detail, applied: Boolean(s.apply) && !dryRun }));
+    return print(JSON.stringify(report));
+  }
+  for (const step of steps) {
+    const mark = step.action === "absent" ? "-" : step.action === "ok" ? "ok" : dryRun ? "would" : "done";
+    if (step.apply && !dryRun) step.apply();
+    print(`${mark.padEnd(5)} ${step.label.padEnd(15)} ${step.action === "absent" || step.action === "ok" ? step.detail : `${step.action}: ${step.detail}`}`);
+  }
+  if (command === "install" && !steps.some((s) => s.action !== "absent")) {
+    print("No AI client found. Add watch-mcp by hand: see the README (Install).");
+  }
+  if (dryRun) print("(dry run: nothing was changed)");
   return 0;
 }
 
