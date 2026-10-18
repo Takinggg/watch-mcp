@@ -1,17 +1,38 @@
 {
   "name": "watch-mcp",
   "version": "0.1.0",
-  "description": "Let Claude watch videos: an MCP server that turns an MP4/MOV/MKV/WebM into timestamped storyboards, drill-down frames and a local Whisper transcript.",
+  "description": "MCP server that lets Claude, Codex and Cursor watch videos and screen recordings: timestamped storyboards, zoom and full-resolution frames, and a local Whisper transcript.",
   "keywords": [
     "mcp",
+    "mcp-server",
     "model-context-protocol",
     "claude",
+    "claude-code",
+    "claude-desktop",
+    "codex",
+    "cursor",
+    "ai-agents",
     "video",
-    "ffmpeg",
-    "whisper",
+    "video-understanding",
+    "screen-recording",
+    "screen-recorder",
     "storyboard",
-    "screen-recording"
+    "keyframes",
+    "transcription",
+    "whisper",
+    "ffmpeg",
+    "macos",
+    "local-first"
   ],
+  "homepage": "https://github.com/Takinggg/watch-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Takinggg/watch-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Takinggg/watch-mcp/issues"
+  },
+  "mcpName": "io.github.Takinggg/watch-mcp",
   "author": "Maxence Foulon",
   "license": "MIT",
   "type": "module",
