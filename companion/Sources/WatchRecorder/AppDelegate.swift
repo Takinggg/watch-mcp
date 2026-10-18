@@ -31,9 +31,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        DockIcon.apply()
+        NSApp.mainMenu = MainMenu.make(target: self, settings: #selector(openSettings), quit: #selector(quit))
         tracker.start()
         NotificationCenter.default.addObserver(forName: .watchRecorderLanguageChanged, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh() }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                NSApp.mainMenu = MainMenu.make(target: self, settings: #selector(self.openSettings), quit: #selector(self.quit))
+                self.refresh()
+            }
         }
         let spec = Settings.hotKey
         hotKey = HotKey(spec) { [weak self] in self?.toggle() }
@@ -218,6 +224,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dashboard.show()
     }
 
+    @objc private func openSettings() {
+        dashboard.model.section = .settings
+        dashboard.model.selected = nil
+        dashboard.show()
+    }
+
+    /// Right-click on the Dock icon.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        menu.addItem(toggleMenuItem())
+        menu.addItem(item(L.t("Open WatchRecorder", "Ouvrir WatchRecorder", "WatchRecorder 열기"), #selector(openDashboard)))
+        return menu
+    }
+
+    /// Quitting from the Dock, ⌘Q or macOS's "Quit & Reopen" while recording keeps the recording.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard phase == .recording else { return .terminateNow }
+        Task {
+            await stopRecording()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     /// Opening the app again (Finder, Spotlight, Launchpad) while it runs shows its window,
     /// instead of doing nothing visible.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -277,11 +307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(disabled(notice ?? status))
         menu.addItem(.separator())
         menu.addItem(item(L.t("Open WatchRecorder", "Ouvrir WatchRecorder", "WatchRecorder 열기"), #selector(openDashboard)))
-        let toggleTitle = phase == .recording ? L.t("Stop Recording", "Arrêter l'enregistrement", "녹화 멈추기") : L.t("Start Recording", "Démarrer l'enregistrement", "녹화 시작")
-        let toggleItem = NSMenuItem(title: "\(toggleTitle)  (\(shortcut))", action: #selector(toggle), keyEquivalent: "")
-        toggleItem.target = self
-        toggleItem.isEnabled = phase == .idle || phase == .recording
-        menu.addItem(toggleItem)
+        menu.addItem(toggleMenuItem())
         menu.addItem(item(L.t("Copy Last Prompt", "Copier le dernier prompt", "마지막 프롬프트 복사"), #selector(copyLastPrompt), enabled: lastPrompt != nil))
         menu.addItem(item(L.t("Show Recordings in Finder", "Afficher les enregistrements", "Finder에서 녹화 보기"), #selector(showRecordings)))
         menu.addItem(item(L.t("Permissions and Setup…", "Permissions et installation…", "권한 및 설정…"), #selector(showOnboarding)))
@@ -296,6 +322,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(item(L.t("Quit WatchRecorder", "Quitter WatchRecorder", "WatchRecorder 종료"), #selector(quit)))
         return menu
+    }
+
+    private func toggleMenuItem() -> NSMenuItem {
+        let shortcut = Settings.hotKey.display
+        let title = phase == .recording ? L.t("Stop Recording", "Arrêter l'enregistrement", "녹화 멈추기") : L.t("Start Recording", "Démarrer l'enregistrement", "녹화 시작")
+        let toggleItem = NSMenuItem(title: "\(title)  (\(shortcut))", action: #selector(toggle), keyEquivalent: "")
+        toggleItem.target = self
+        toggleItem.isEnabled = phase == .idle || phase == .recording
+        return toggleItem
     }
 
     private func item(_ title: String, _ action: Selector, enabled: Bool = true) -> NSMenuItem {

@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var microphone = Settings.recordMicrophone
     @State private var maxMinutes = Settings.maxMinutes
     @State private var language = Settings.appLanguage
+    @State private var showInDock = Settings.showInDock
 
     var body: some View {
         let model = onboarding.model
@@ -19,6 +20,14 @@ struct SettingsView: View {
                     Picker(L.t("Interface language", "Langue de l'interface", "인터페이스 언어"), selection: Binding(get: { language }, set: { language = $0; Settings.appLanguage = $0 })) {
                         ForEach(AppLanguage.allCases) { Text($0.name).tag($0) }
                     }.pickerStyle(.segmented)
+                }
+                Section(title: L.t("App", "App", "앱"), note: L.t("Off: WatchRecorder stays in the menu bar only.", "Désactivé : WatchRecorder reste seulement dans la barre des menus.", "끄면 WatchRecorder는 메뉴 막대에만 있어요.")) {
+                    Toggle(L.t("Show in the Dock", "Afficher dans le Dock", "Dock에 표시"), isOn: Binding(get: { showInDock }, set: { on in
+                        showInDock = on
+                        Settings.showInDock = on
+                        DockIcon.apply()
+                        NSApp.activate()
+                    }))
                 }
                 Section(title: L.t("Recording quality", "Qualité d'enregistrement", "녹화 품질"),
                         note: L.t("Image tokens are computed with Anthropic's image formula for a 1-minute recording; file sizes are measured on your own recordings.",

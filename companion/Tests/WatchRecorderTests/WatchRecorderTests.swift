@@ -242,3 +242,31 @@ import Testing
     }
 }
 
+@Suite(.serialized) @MainActor struct AppPresenceTests {
+    @objc private final class Target: NSObject {
+        @objc func settings() {}
+        @objc func quit() {}
+    }
+
+    @Test func menusGiveTextFieldsTheUsualShortcuts() throws {
+        _ = NSApplication.shared
+        let target = Target()
+        let menu = MainMenu.make(target: target, settings: #selector(Target.settings), quit: #selector(Target.quit))
+        let items = menu.items.compactMap(\.submenu).flatMap(\.items)
+        for (key, action) in [("v", #selector(NSText.paste(_:))), ("c", #selector(NSText.copy(_:))), ("a", #selector(NSText.selectAll(_:))), ("w", #selector(NSWindow.performClose(_:)))] {
+            #expect(items.contains { $0.keyEquivalent == key && $0.action == action }, "⌘\(key)")
+        }
+        let quit = try #require(items.first { $0.keyEquivalent == "q" })
+        #expect(quit.action == #selector(Target.quit) && quit.target === target)
+    }
+
+    @Test func showsInTheDockUnlessTurnedOff() {
+        let saved = Settings.defaults.object(forKey: "ShowInDock")
+        defer { Settings.defaults.set(saved, forKey: "ShowInDock") }
+        Settings.defaults.removeObject(forKey: "ShowInDock")
+        #expect(Settings.showInDock)
+        Settings.showInDock = false
+        #expect(!Settings.showInDock)
+    }
+}
+

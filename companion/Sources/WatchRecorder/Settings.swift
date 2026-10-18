@@ -107,6 +107,12 @@ enum Settings {
         set { defaults.set(newValue, forKey: "ScreenPromptShown") }
     }
 
+    /// Shows the app in the Dock and the app switcher (default), or only in the menu bar.
+    static var showInDock: Bool {
+        get { defaults.object(forKey: "ShowInDock") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "ShowInDock") }
+    }
+
     /// Set when the user reaches the end of setup; from then on the app opens on the library.
     static var setupFinished: Bool {
         get { defaults.bool(forKey: "SetupFinished") }
