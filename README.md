@@ -362,6 +362,7 @@ npm run build
 node dist/cli.js watch some-video.mp4 --out ./watch-output   # storyboards + timeline.txt
 scripts/make-demo-video.sh && scripts/make-demo-gif.sh        # the demo above (macOS)
 scripts/make-app-gif.sh                                        # the WatchRecorder tour (needs the built app and demo/)
+swift scripts/make-social-preview.swift "$PWD"                 # docs/social-preview.png, the picture for shared links
 node scripts/make-demo-bundle.mjs && node dist/cli.js finalize demo/demo-screen.watch   # demo bundle (synthetic events)
 swift companion/Scripts/make-icon.swift "$PWD"                 # redraws the logo and the app icon
 cd companion && swift test                                     # WatchRecorder: 26 tests (shortcut, prompt, bundle, delivery, setup, menus)
