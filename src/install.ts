@@ -96,7 +96,7 @@ function claudeCodeStep(env: Env, server: ServerCommand): InstallStep {
   if (!claude) return { client: "claude-code", label, action: "absent", detail: "`claude` command not found" };
   const existing = env.run(claude, ["mcp", "get", SERVER_NAME]);
   const wanted = [server.command, ...server.args].join(" ");
-  if (existing.status === 0 && existing.stdout.includes(wanted)) {
+  if (existing.status === 0 && claudeCodeRuns(existing.stdout, server)) {
     return { client: "claude-code", label, action: "ok", detail: "already set up" };
   }
   const update = existing.status === 0;
@@ -111,6 +111,12 @@ function claudeCodeStep(env: Env, server: ServerCommand): InstallStep {
       if (out.status !== 0) throw new WatchError("BAD_ARGUMENT", `claude mcp add failed: ${out.stdout.trim().split("\n").pop() ?? ""}`);
     },
   };
+}
+
+/** `claude mcp get` prints the command and its arguments on separate lines ("Command: ...", "Args: ..."). */
+function claudeCodeRuns(output: string, server: ServerCommand): boolean {
+  const field = (name: string) => new RegExp(`^\\s*${name}:[ \\t]*(.*)$`, "m").exec(output)?.[1]?.trim() ?? "";
+  return field("Command") === server.command && field("Args") === server.args.join(" ");
 }
 
 function claudeCodeRemove(env: Env): InstallStep {

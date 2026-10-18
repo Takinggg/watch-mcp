@@ -8,6 +8,11 @@ import { codexBlock, planInstall, planUninstall, replaceTomlTable } from "../src
 const SERVER = { command: "/opt/homebrew/bin/npx", args: ["-y", "watch-mcp"] };
 
 /** A fake home with Codex, Claude Desktop and Cursor folders, and a fake `claude` CLI that logs its calls. */
+/** What `claude mcp get watch` prints (Claude Code 2.1). */
+function claudeGet(command: string, args: string): string {
+  return `watch:\n  Scope: User config (available in all your projects)\n  Status: ✔ Connected\n  Type: stdio\n  Command: ${command}\n  Args: ${args}\n  Environment:\n\nTo remove this server, run: claude mcp remove watch -s user\n`;
+}
+
 function fakeEnv(options: { claudeHas?: string } = {}) {
   const home = mkdtempSync(path.join(os.tmpdir(), "watch-install-"));
   const codexDir = path.join(home, ".codex");
@@ -48,10 +53,15 @@ describe("install into AI clients", () => {
   });
 
   it("is idempotent: a second run changes nothing", () => {
-    const { env } = fakeEnv({ claudeHas: "watch: /opt/homebrew/bin/npx -y watch-mcp" });
+    const { env } = fakeEnv({ claudeHas: claudeGet(SERVER.command, SERVER.args.join(" ")) });
     for (const step of planInstall(env, SERVER)) step.apply?.();
     const again = planInstall(env, SERVER);
     assert.deepEqual(again.map((s) => s.action), ["ok", "ok", "ok", "ok"]);
+  });
+
+  it("sees an older command in Claude Code as an update", () => {
+    const { env } = fakeEnv({ claudeHas: claudeGet("node", "/old/cli.js") });
+    assert.equal(planInstall(env, SERVER)[0]?.action, "update");
   });
 
   it("updates an old entry instead of duplicating it", () => {
