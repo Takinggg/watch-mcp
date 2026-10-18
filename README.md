@@ -1,9 +1,17 @@
+<p align="center"><img src="docs/logo.png" width="128" alt="watch-mcp logo: an eye whose pupil is a play button"></p>
+
 # watch-mcp
 
 **Let Claude watch videos.** Drop an MP4/MOV/MKV/WebM path into Claude Code, Claude Desktop or Cursor, and Claude sees what happens on screen and hears what is said, without anyone touching ffmpeg.
 
+**Install it by giving this repository to your AI.** In Claude Code, Codex or Cursor, say:
+
+> Install https://github.com/Takinggg/watch-mcp
+
+It follows [AGENTS.md](AGENTS.md): registers the server in every AI app on your machine, downloads the speech model, and on a Mac builds the WatchRecorder app. Or do it yourself in one line:
+
 ```bash
-claude mcp add watch -- npx -y watch-mcp
+npx -y watch-mcp install
 ```
 
 Then ask: *"Watch ~/Desktop/bug.mov and fix what I show you."*
@@ -27,13 +35,22 @@ Everything runs on your machine. No API key, no upload.
 
 Requires Node.js 20 or later. ffmpeg comes bundled with the package (via [ffmpeg-static](https://www.npmjs.com/package/ffmpeg-static) and [@ffprobe-installer/ffprobe](https://www.npmjs.com/package/@ffprobe-installer/ffprobe)); the Whisper bindings come prebuilt ([@fugood/whisper.node](https://www.npmjs.com/package/@fugood/whisper.node)), so nothing compiles on install.
 
+**Every AI app at once.** `npx -y watch-mcp install` finds Claude Code, Codex, Claude Desktop and Cursor on this machine and adds watch-mcp to each (idempotent; every edited file is backed up as `*.watch-mcp.bak`; `--dry-run` shows the plan, `--client codex` limits it, `npx -y watch-mcp uninstall` removes it). To do it by hand instead:
+
 **Claude Code**
 
 ```bash
-claude mcp add watch -- npx -y watch-mcp
+claude mcp add -s user watch -- npx -y watch-mcp
 ```
 
-Add `-s user` to make it available in every project.
+**Codex** (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.watch]
+command = "npx"
+args = ["-y", "watch-mcp"]
+startup_timeout_sec = 60
+```
 
 **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows), then restart the app:
 
@@ -65,7 +82,9 @@ npx -y watch-mcp setup
 | `transcribe` | The timestamped transcript only (text). Waits for the speech model if it is still downloading. | `path` (required), `language` |
 | `latest_recording` | Same as `watch_video`, on the last recording made with the WatchRecorder app (below). Also exposed as the resource `watch://recordings/latest`. | `budget` |
 
-`path` can be a video file or a `.watch` recording bundle (below). Times accept seconds (`83.5`) or timestamps (`01:23.5`, `1:02:03`). `crop` is a region in fractions of the frame: `{"x": 0.5, "y": 0, "width": 0.5, "height": 0.5}` is the top-right quarter.
+`path` can be a video file or a `.watch` recording bundle (below). Times accept seconds (`83.5`) or timestamps (`01:23.5`, `1:02:03`).
+
+watch-mcp also exposes an MCP prompt, `latest`. In Claude Code it is the command `/mcp__watch__latest`: it puts your latest WatchRecorder recording (path and what you said) into the current conversation, no copy and paste needed. `crop` is a region in fractions of the frame: `{"x": 0.5, "y": 0, "width": 0.5, "height": 0.5}` is the top-right quarter.
 
 A `watch_video` result looks like this (text parts; the storyboard images sit between them):
 
@@ -147,14 +166,14 @@ Whisper large-v3-turbo (q5_0) transcribed 29.5 s of French and English speech in
 - **Local by default**: bundled ffmpeg, Whisper on Metal with voice activity detection, no keys.
 - What it does not do: download from URLs (claude-video does, with yt-dlp). Download the video first, then pass the path.
 
-## WatchRecorder: show Claude instead of typing (macOS)
+## WatchRecorder: show your AI instead of typing (macOS)
 
-A small menu-bar app in [`companion/`](companion/). Press **⌥⇧R**, show the problem on screen while you explain it out loud, press **⌥⇧R** again. WatchRecorder then:
+A native menu-bar app in [`companion/`](companion/), in English, French and Korean. Press **⌥⇧R**, show the problem while you explain it out loud, press **⌥⇧R** again. A floating pill shows that it is recording (live microphone level, timer, click to stop) and is left out of the video. Then WatchRecorder:
 
 1. saves a [recording bundle](#recording-bundles-watch-an-open-format) in `~/Movies/WatchRecorder/`: the screen under the mouse pointer and your microphone in one video (same clock), plus what you did (clicks with their position, app switches, and, only if you already trust the app for Accessibility, how long and how much you typed, never which keys),
-2. runs `watch-mcp finalize` on it: your words are transcribed with word timestamps and written into the bundle, and the storyboards are prepared, so Claude's first look is instant,
+2. runs `watch-mcp finalize` on it: your words are transcribed with word timestamps and written into the bundle, and the storyboards are prepared, so the AI's first look is instant,
 3. writes `~/Library/Application Support/watch-mcp/latest-recording.json` for the `latest_recording` tool,
-4. copies a ready prompt and pastes it into Claude: it brings the Claude desktop app to the front and presses ⌘V, like a dictation app (you check it and send). Without the Accessibility permission, or when Claude is not open, the prompt stays on the clipboard. The prompt:
+4. copies a ready prompt and brings back the AI app you were using (Claude, ChatGPT/Codex, Cursor, VS Code or your terminal) on its current conversation: press ⌘V and send. No permission is needed for that. If you turn on *Paste Automatically*, it also presses ⌘V for you (this one needs Accessibility). The prompt:
 
 ```text
 Watch my screen recording and do what I ask in it.
@@ -165,7 +184,28 @@ What I said: "When I click Export the dialog flickers and closes. Fix it."
 Use the watch-mcp tools (latest_recording, or watch_video with the path above) to see what I showed on screen.
 ```
 
-Claude (with watch-mcp installed) then watches what you showed and does what you asked. A floating pill at the bottom of the screen shows each step: recording (red dot, microphone level, timer; click it to stop), transcribing, pasted. It is left out of the video.
+**The library** (menu bar icon > *Open WatchRecorder*) lists every recording by day with the first thing you said, a search over everything said, and for each recording the video, the keyframes the AI will see, the transcript (click a line to jump there) and what you did. *Send to my AI* hands any past recording over again.
+
+<p align="center">
+  <img src="docs/screenshots/library.png" width="49%" alt="WatchRecorder library: recordings by day, search over what was said, a get-started checklist">
+  <img src="docs/screenshots/recording.png" width="49%" alt="A recording: video, keyframes the AI sees, transcript with timestamps">
+</p>
+
+**The setup guide** opens on first launch: one step per screen, each one tested for real (the microphone shows your voice, the shortcut has to be pressed, a first recording is made). It asks for each macOS permission only when you click, connects your AI apps with `watch-mcp install`, and lets you pick a quality preset with what it costs: image tokens per minute computed with Anthropic's image formula, and file size per minute measured on your own recordings.
+
+<p align="center">
+  <img src="docs/screenshots/setup-welcome.png" width="32%" alt="Setup guide: welcome">
+  <img src="docs/screenshots/setup-quality.png" width="32%" alt="Setup guide: quality presets with image tokens and file size">
+  <img src="docs/screenshots/setup-connect.png" width="32%" alt="Setup guide: connect your AI apps">
+</p>
+
+| Preset | Video | Keyframes for 1 min | Image tokens for 1 min (upper bound) |
+| --- | --- | --- | --- |
+| Light | 1280 px, 15 fps | 16 | 2,128 |
+| Balanced (default) | 1920 px, 30 fps | 32 | 4,256 |
+| Detailed | 2560 px, 30 fps | 48 | 6,384 |
+
+The preset is stored in the bundle, so `watch_video` shows that many keyframes by default (one per 6, 3 or 1.5 seconds, capped at 32, 64 or 128).
 
 **Build and run** (macOS 15 or later, Swift 6 from Xcode or the Command Line Tools):
 
@@ -175,13 +215,11 @@ cd companion && ./build-app.sh && open build/WatchRecorder.app
 
 The icon sits in the menu bar (no Dock icon). It is red while recording; recordings stop by themselves after 10 minutes.
 
-**First launch.** A welcome window lists the permissions with a live check mark for each, an **Allow** button that opens the right place, a **Relaunch** button (macOS applies screen recording at launch), and the command that connects Claude Code. It comes back whenever screen recording is not allowed, and from the menu (*Permissions and Setup…*).
-
 **Permissions.** macOS asks once for each:
 
 - **Screen & System Audio Recording**: the first ⌥⇧R opens the system prompt. Turn WatchRecorder on in System Settings > Privacy & Security > Screen & System Audio Recording, then quit and reopen the app (macOS applies this permission at launch).
 - **Microphone**: an Allow / Don't Allow dialog. Without it, WatchRecorder records the screen only.
-- **Accessibility** (optional): lets WatchRecorder press ⌘V in Claude for you. macOS asks the first time a prompt is ready; the pill has a button to the right Settings pane.
+- **Accessibility** (optional): only for *Paste Automatically*, which presses ⌘V for you. WatchRecorder asks for it only when you turn that option on, never by itself.
 
 The global shortcut uses Carbon's `RegisterEventHotKey`, which needs no Accessibility permission. Clicks are observed with a global mouse monitor; per Apple's `NSEvent` documentation only key events need Accessibility trust, and WatchRecorder never asks for it (typing is simply left out when it is not granted). Double-clicking a `.watch` bundle in Finder opens its video. **Keeping permissions across rebuilds.** macOS ties these permissions to the app's code signature. `build-app.sh` signs ad-hoc by default, so every rebuild looks like a new app: the Screen Recording switch may stay on while applying to the old build (remove WatchRecorder with **−**, or run `tccutil reset ScreenCapture io.github.takinggg.watchrecorder`, then allow it again). This only concerns people who build the app themselves: a released app signed with a Developer ID keeps one identity across updates, so its users grant the permissions once. To sign every local build with the same identity, run `companion/make-signing-identity.sh` once (it makes a self-signed certificate in a keychain file inside `companion/.signing/`, not in your login keychain), then trust that certificate for code signing, which asks for your password: `security add-trusted-cert -r trustRoot -p codeSign -k "$PWD/companion/.signing/watchrecorder.keychain-db" companion/.signing/cert.pem` (from the repository root; `security` reads a relative keychain path as relative to `~/Library/Keychains`). From then on `build-app.sh` uses it (codesign only reads keychains on your search list, so the script lists the project keychain while signing and restores the list right after), and permissions survive rebuilds. `WATCHRECORDER_SIGN_IDENTITY="<name>"` uses any other signing certificate you have.
 
@@ -195,7 +233,10 @@ The global shortcut uses Carbon's `RegisterEventHotKey`, which needs no Accessib
 | `MaxMinutes` | `10` | automatic stop |
 | `RecordingsFolder` | `~/Movies/WatchRecorder` | |
 | `RecordMicrophone` | `true` | also in the menu |
-| `PasteInto` | `claude` | `claude` (the Claude desktop app), `frontmost` (the app in front when you stop), `off`, or an app's bundle id (e.g. `com.apple.Terminal` for Claude Code in Terminal) |
+| `Quality` | `balanced` | `light`, `balanced` or `detailed`; also in Settings |
+| `AppLanguage` | `auto` | `auto` (the Mac's language), `en`, `fr` or `ko`; also in Settings |
+| `SendTo` | `auto` | `auto` (the AI app you were using: in front when you stop, else the last one you used), `claude`, `codex`, `off` (clipboard only), or an app's bundle id; also in the menu |
+| `AutoPaste` | `false` | press ⌘V in that app for you (needs Accessibility); also in the menu |
 | `WatchMcpCommand` | `npx -y watch-mcp` | how the app runs watch-mcp; when the app is built inside a watch-mcp checkout it uses that checkout's `dist/cli.js` |
 
 **Sharing the app with other people** needs an Apple Developer Program membership (99 USD a year); this repository does not set that up. Without it, Gatekeeper blocks a downloaded copy. The steps are:
@@ -300,15 +341,16 @@ Videos never leave your machine. The only network access is the one-time model d
 
 ```bash
 npm install
-npm test          # 55 tests: unit, ffmpeg pipeline, bundles, MCP over stdio, transcription (macOS)
+npm test          # 56 tests: unit, ffmpeg pipeline, bundles, MCP over stdio, transcription (macOS)
 npm run build
 node dist/cli.js watch some-video.mp4 --out ./watch-output   # storyboards + timeline.txt
 scripts/make-demo-video.sh && scripts/make-demo-gif.sh        # the demo above (macOS)
 node scripts/make-demo-bundle.mjs && node dist/cli.js finalize demo/demo-screen.watch   # demo bundle (synthetic events)
-cd companion && swift test                                     # WatchRecorder: 10 tests (shortcut, prompt, bundle files, events)
+swift companion/Scripts/make-icon.swift "$PWD"                 # redraws the logo and the app icon
+cd companion && swift test                                     # WatchRecorder: 13 tests (shortcut, prompt, bundle files, events, delivery)
 ```
 
-`WatchRecorder --handoff-test <bundle.watch>` runs everything that follows a recording (finalize, state file, prompt) on an existing bundle and prints the prompt instead of copying it. `WatchRecorder --self-test <seconds> <out.mov>` records only a test window drawn by the app itself (needs the Screen Recording permission).
+`WatchRecorder --render-ui <out dir> <recordings folder> [--language en|fr|ko]` draws every screen (setup guide, library, recording, settings; light and dark) to PNG files without recording anything; the screenshots above come from it, on the synthetic demo. `WatchRecorder --handoff-test <bundle.watch>` runs everything that follows a recording (finalize, state file, prompt) on an existing bundle and prints the prompt instead of copying it. `WatchRecorder --self-test <seconds> <out.mov>` records only a test window drawn by the app itself (needs the Screen Recording permission).
 
 The test videos are generated with ffmpeg (test patterns, plus a sentence spoken by macOS `say` for the transcription test).
 
