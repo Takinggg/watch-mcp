@@ -189,6 +189,8 @@ private struct LibraryView: View {
                     Text(greeting()).font(Theme.headline(34))
                     Text(model.library.recordings.isEmpty
                          ? L.t("Show your screen while you talk; your AI watches it.", "Montre ton écran en parlant, ton IA regarde.", "말하면서 화면을 보여 주세요. AI가 지켜봐요.")
+                         : model.library.recordings.count == 1
+                         ? L.t("1 recording, \(Format.bytes(model.library.totalBytes)), on this Mac.", "1 enregistrement, \(Format.bytes(model.library.totalBytes)), sur ce Mac.", "녹화 1개, \(Format.bytes(model.library.totalBytes)), 이 Mac에 있어요.")
                          : L.t("\(model.library.recordings.count) recordings, \(Format.bytes(model.library.totalBytes)), all on this Mac.", "\(model.library.recordings.count) enregistrements, \(Format.bytes(model.library.totalBytes)), tous sur ce Mac.", "녹화 \(model.library.recordings.count)개, \(Format.bytes(model.library.totalBytes)), 모두 이 Mac에 있어요."))
                         .foregroundStyle(.secondary)
                 }
