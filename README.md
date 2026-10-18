@@ -357,7 +357,7 @@ Videos never leave your machine. The only network access is the one-time model d
 
 ```bash
 npm install
-npm test          # 65 tests: unit, ffmpeg pipeline, bundles, install, MCP over stdio, transcription (macOS)
+npm test          # 66 tests: unit, ffmpeg pipeline, bundles, install, MCP over stdio, transcription (macOS)
 npm run build
 node dist/cli.js watch some-video.mp4 --out ./watch-output   # storyboards + timeline.txt
 scripts/make-demo-video.sh && scripts/make-demo-gif.sh        # the demo above (macOS)
