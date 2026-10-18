@@ -141,6 +141,12 @@ describe("budgets", () => {
     assert.equal(defaultBudget(150), 64);
     assert.equal(defaultBudget(3600), 64);
   });
+  it("follows the recording preset of a bundle", () => {
+    assert.equal(defaultBudget(60, "light"), 16);
+    assert.equal(defaultBudget(600, "light"), 32);
+    assert.equal(defaultBudget(60, "detailed"), 48);
+    assert.equal(defaultBudget(3600, "detailed"), 128);
+  });
   it("caps zoom density by frame count and source rate", () => {
     assert.equal(zoomFps(2, 30), 24);
     assert.equal(zoomFps(1, 30), 30);

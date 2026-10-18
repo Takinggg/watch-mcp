@@ -64,6 +64,15 @@ export function shortClip(ext: "mov" | "mkv" | "webm", size = "320x180"): string
   return out;
 }
 
+/** gray-40s.mp4: 40 s of a plain gray picture, 160x90 (long enough for presets to differ). */
+export function fortySeconds(): string {
+  const out = path.join(FIXTURES, "gray-40s.mp4");
+  if (existsSync(out)) return out;
+  mkdirSync(FIXTURES, { recursive: true });
+  ffmpeg(["-f", "lavfi", "-i", "color=c=gray:s=160x90:r=10:d=40", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", out]);
+  return out;
+}
+
 /** Width and height read from a JPEG's start-of-frame marker. */
 export function jpegSize(data: Buffer): { width: number; height: number } {
   if (data[0] !== 0xff || data[1] !== 0xd8) throw new Error("not a JPEG");
@@ -84,8 +93,8 @@ export function frameTimes(timeline: string): number[] {
 }
 
 /** A bundle around slides.mp4 (20 s, static red from 4 to 8 s) with the given timeline. */
-export function makeBundle(timeline: unknown, manifest: Record<string, unknown> = {}): string {
-  const slides = slidesVideo();
+export function makeBundle(timeline: unknown, manifest: Record<string, unknown> = {}, video: string = slidesVideo()): string {
+  const slides = video;
   const dir = path.join(mkdtempSync(path.join(os.tmpdir(), "watch-bundle-")), "Test.watch");
   mkdirSync(dir);
   copyFileSync(slides, path.join(dir, "video.mp4"));

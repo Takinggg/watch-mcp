@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import path from "node:path";
 import { computeSignatures } from "./analyze.ts";
-import { isBundleDir, readBundle, type Bundle, type BundleEvent } from "./bundle.ts";
+import { isBundleDir, isQuality, readBundle, type Bundle, type BundleEvent, type Quality } from "./bundle.ts";
 import { fingerprint, readCached, readCachedBinary, resultKey, writeCached } from "./cache.ts";
 import { encodeJpeg } from "./encode.ts";
 import { WatchError } from "./errors.ts";
@@ -50,13 +50,21 @@ export const TILES_PER_SHEET = 16;
 export const MAX_BUDGET = 128;
 const GUTTER = 4;
 
+/** Keyframe rules per recording preset (kept in step with companion/Sources/WatchRecorder/Quality.swift). */
+const QUALITY_RULES: Record<Quality, { secondsPerKeyframe: number; maxKeyframes: number }> = {
+  light: { secondsPerKeyframe: 6, maxKeyframes: 32 },
+  balanced: { secondsPerKeyframe: 3, maxKeyframes: 64 },
+  detailed: { secondsPerKeyframe: 1.5, maxKeyframes: 128 },
+};
+
 /**
- * About one keyframe per 3 s, rounded up to whole storyboards (16 tiles cost
- * the same image tokens as 13), between 1 and 4 storyboards.
+ * About one keyframe per 3 s (per the bundle's quality preset when there is one), rounded up
+ * to whole storyboards (16 tiles cost the same image tokens as 13), capped per preset.
  */
-export function defaultBudget(span: number): number {
-  const sheets = Math.ceil(span / 3 / TILES_PER_SHEET);
-  return Math.min(4, Math.max(1, sheets)) * TILES_PER_SHEET;
+export function defaultBudget(span: number, quality: Quality = "balanced"): number {
+  const rule = QUALITY_RULES[quality];
+  const sheets = Math.max(1, Math.ceil(span / rule.secondsPerKeyframe / TILES_PER_SHEET));
+  return Math.min(rule.maxKeyframes, sheets * TILES_PER_SHEET);
 }
 
 export interface LoadedVideo {
@@ -116,7 +124,8 @@ export async function watchCore(params: WatchParams): Promise<WatchCore> {
   const { info, fp } = loaded;
   const range = clampRange(info, params.start, params.end);
   const span = range.end - range.start;
-  const budget = Math.min(MAX_BUDGET, Math.max(4, Math.floor(params.budget ?? defaultBudget(span))));
+  const quality = isQuality(loaded.bundle?.manifest.quality) ? loaded.bundle.manifest.quality : undefined;
+  const budget = Math.min(MAX_BUDGET, Math.max(4, Math.floor(params.budget ?? defaultBudget(span, quality))));
   const events = loaded.bundle?.timeline.events ?? [];
   const clicks = events.filter((e): e is ClickEvent => e.type === "click" && e.t >= range.start && e.t <= range.end);
   const key = resultKey("watch", fp, { v: RENDER_VERSION, start: range.start, end: range.end, budget, clicks: digest(clicks) });

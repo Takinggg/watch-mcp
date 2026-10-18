@@ -7,7 +7,7 @@ import { readBundle, updateTimeline } from "../src/bundle.ts";
 import { zoomVideo } from "../src/drilldown.ts";
 import { finalizeBundle } from "../src/finalize.ts";
 import { watchVideo } from "../src/watch.ts";
-import { frameTimes, makeBundle, slidesVideo } from "./fixtures.ts";
+import { fortySeconds, frameTimes, makeBundle, slidesVideo } from "./fixtures.ts";
 
 let slides = "";
 before(() => {
@@ -56,6 +56,17 @@ describe("recording bundles", () => {
     const out = await zoomVideo({ path: makeBundle({ version: 1, events: EVENTS }), start: 5.5, end: 6.5, fps: 10 });
     assert.match(out.outro, /DONE 00:06\.00  left click at x 25%, y 50% in Safari/);
     assert.doesNotMatch(out.outro, /typed/);
+  });
+
+  it("uses the bundle's quality preset for the default number of keyframes", async () => {
+    // 40 s: Light asks one keyframe per 6 s (one storyboard of 16), Detailed one per 1.5 s (two).
+    const video = fortySeconds();
+    const light = await watchVideo({ path: makeBundle({ version: 1, events: [] }, { quality: "light" }, video), transcript: false });
+    const detailed = await watchVideo({ path: makeBundle({ version: 1, events: [] }, { quality: "detailed" }, video), transcript: false });
+    const plain = await watchVideo({ path: makeBundle({ version: 1, events: [] }, {}, video), transcript: false });
+    assert.match(light.intro, /\(budget 16\)/);
+    assert.match(detailed.intro, /\(budget 32\)/);
+    assert.match(plain.intro, /\(budget 16\)/);
   });
 
   it("uses the transcript a bundle already carries", async () => {

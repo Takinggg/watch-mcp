@@ -24,6 +24,17 @@ export interface BundleManifest {
   createdAt: string;
   duration?: number;
   recorder?: { name: string; version: string };
+  /** Recording preset; also sets how many keyframes watch_video shows by default. */
+  quality?: Quality;
+  width?: number;
+  height?: number;
+  fps?: number;
+}
+
+export type Quality = "light" | "balanced" | "detailed";
+
+export function isQuality(value: unknown): value is Quality {
+  return value === "light" || value === "balanced" || value === "detailed";
 }
 
 export type BundleEvent =
