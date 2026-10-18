@@ -97,7 +97,10 @@ struct MockSettingsRow: View {
                 AppLogo(size: 24)
                 Text("WatchRecorder").font(.system(size: 13))
                 Spacer()
-                Toggle("", isOn: .constant(on)).toggleStyle(.switch).labelsHidden().allowsHitTesting(false)
+                // Drawn rather than a real Toggle, which turns gray in an inactive window.
+                Capsule().fill(on ? Color(nsColor: .controlAccentColor) : Theme.subtle)
+                    .frame(width: 38, height: 22)
+                    .overlay(alignment: on ? .trailing : .leading) { Circle().fill(.white).shadow(radius: 1, y: 0.5).padding(2) }
             }
             .padding(.horizontal, 12).padding(.vertical, 9)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
