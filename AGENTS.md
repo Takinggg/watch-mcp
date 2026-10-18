@@ -14,7 +14,7 @@ Goal: the user's AI apps can watch videos (`watch_video`, `zoom`, `frame`, `tran
    npx -y watch-mcp install
    ```
 
-   It handles Claude Code (`claude mcp add -s user`), Codex (`~/.codex/config.toml`), Claude Desktop and Cursor (their JSON configs). It is idempotent and backs up every file it edits (`*.watch-mcp.bak`). `--client codex` (comma-separated list) limits it to some clients. From a clone of this repository, use `npm install && npm run build && node dist/cli.js install` instead of `npx`.
+   It handles Claude Code (`claude mcp add -s user`), Codex (`~/.codex/config.toml`), Claude Desktop and Cursor (their JSON configs). While Claude Desktop is open it rewrites its settings file and would drop the change, so `install` reports it as `blocked` and leaves it alone: ask the user to quit Claude Desktop (⌘Q) and run `install --client claude-desktop` again (if you are running inside Claude Desktop, tell them to do it after this conversation). It is idempotent and backs up every file it edits (`*.watch-mcp.bak`). `--client codex` (comma-separated list) limits it to some clients. From a clone of this repository, use `npm install && npm run build && node dist/cli.js install` instead of `npx`.
 3. **Download the speech models now** (574 MB on Apple Silicon, 148 MB elsewhere), so the first video is fast: `npx -y watch-mcp setup`.
 4. **Check**: `npx -y watch-mcp doctor` lists ffmpeg, the speech model and the data folder.
 5. **Tell the user to restart** the clients that were changed (Claude Desktop and Codex read their settings at launch; Claude Code picks it up in a new session).

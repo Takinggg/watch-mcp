@@ -82,7 +82,7 @@ function installCommand(command: "install" | "uninstall", args: string[]): numbe
     return print(JSON.stringify(report));
   }
   for (const step of steps) {
-    const mark = step.action === "absent" ? "-" : step.action === "ok" ? "ok" : dryRun ? "would" : "done";
+    const mark = step.action === "absent" ? "-" : step.action === "ok" ? "ok" : step.action === "blocked" ? "!" : dryRun ? "would" : "done";
     if (step.apply && !dryRun) step.apply();
     print(`${mark.padEnd(5)} ${step.label.padEnd(15)} ${step.action === "absent" || step.action === "ok" ? step.detail : `${step.action}: ${step.detail}`}`);
   }

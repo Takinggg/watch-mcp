@@ -23,8 +23,9 @@ export interface ServerCommand {
 export interface InstallStep {
   client: ClientId;
   label: string;
-  /** "absent": client not found; "ok": already set up; "add"/"update": change to make. */
-  action: "absent" | "ok" | "add" | "update" | "remove";
+  /** "absent": client not found; "ok": already set up; "add"/"update": change to make;
+   *  "blocked": the client must be closed first. */
+  action: "absent" | "ok" | "add" | "update" | "remove" | "blocked";
   detail: string;
   apply?: () => void;
 }
@@ -35,6 +36,8 @@ interface Env {
   which: (name: string) => string | null;
   /** Runs a command, returning its exit code and output (used for the `claude` CLI). */
   run: (bin: string, args: string[]) => { status: number; stdout: string };
+  /** Whether Claude Desktop is open (it keeps its settings file in memory and writes it back). */
+  claudeDesktopOpen: () => boolean;
 }
 
 export function realEnv(): Env {
@@ -44,6 +47,11 @@ export function realEnv(): Env {
     run: (bin, args) => {
       const out = spawnSync(bin, args, { encoding: "utf8", timeout: 30_000 });
       return { status: out.status ?? 1, stdout: `${out.stdout ?? ""}${out.stderr ?? ""}` };
+    },
+    claudeDesktopOpen: () => {
+      if (process.platform !== "darwin") return false;
+      const ps = spawnSync("ps", ["-axo", "comm="], { encoding: "utf8", timeout: 10_000 });
+      return (ps.stdout ?? "").split("\n").some((line) => line.trim().endsWith("/Claude.app/Contents/MacOS/Claude"));
     },
   };
 }
@@ -227,6 +235,7 @@ function jsonStep(env: Env, server: ServerCommand, client: "claude-desktop" | "c
   const servers = (config.mcpServers ?? {}) as Record<string, unknown>;
   const wanted = { command: server.command, args: server.args };
   if (JSON.stringify(servers[SERVER_NAME]) === JSON.stringify(wanted)) return { client, label, action: "ok", detail: "already set up" };
+  if (client === "claude-desktop" && env.claudeDesktopOpen()) return desktopOpen(label);
   const update = SERVER_NAME in servers;
   return {
     client,
@@ -242,8 +251,17 @@ function jsonRemove(env: Env, client: "claude-desktop" | "cursor"): InstallStep 
   const config = existsSync(file) ? readJsonObject(file) : {};
   const servers = (config.mcpServers ?? {}) as Record<string, unknown>;
   if (!(SERVER_NAME in servers)) return { client, label, action: "absent", detail: "not set up" };
+  if (client === "claude-desktop" && env.claudeDesktopOpen()) return desktopOpen(label);
   const { [SERVER_NAME]: _removed, ...rest } = servers;
   return { client, label, action: "remove", detail: `remove from ${file}`, apply: () => writeWithBackup(file, `${JSON.stringify({ ...config, mcpServers: rest }, null, 2)}\n`) };
+}
+
+/**
+ * While Claude Desktop is open it writes its settings file back from memory, which drops a change
+ * made from outside (seen right after an install, and again later).
+ */
+function desktopOpen(label: string): InstallStep {
+  return { client: "claude-desktop", label, action: "blocked", detail: "quit Claude Desktop first (while open it rewrites its settings file and drops the change), then run this again" };
 }
 
 /** Keeps the previous version next to the file (<name>.watch-mcp.bak) before replacing it. */

@@ -77,7 +77,7 @@ enum OnboardingStep: Int, CaseIterable {
 struct AIClientStatus: Decodable, Identifiable {
     let client: String
     let label: String
-    /// "absent", "ok", "add" or "update".
+    /// "absent", "ok", "add", "update", or "blocked" (Claude Desktop must be quit first).
     let action: String
     var id: String { client }
 }

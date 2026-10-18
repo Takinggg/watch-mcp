@@ -7,13 +7,13 @@ import { codexBlock, planInstall, planUninstall, replaceTomlTable } from "../src
 
 const SERVER = { command: "/opt/homebrew/bin/npx", args: ["-y", "watch-mcp"] };
 
-/** A fake home with Codex, Claude Desktop and Cursor folders, and a fake `claude` CLI that logs its calls. */
 /** What `claude mcp get watch` prints (Claude Code 2.1). */
 function claudeGet(command: string, args: string): string {
   return `watch:\n  Scope: User config (available in all your projects)\n  Status: ✔ Connected\n  Type: stdio\n  Command: ${command}\n  Args: ${args}\n  Environment:\n\nTo remove this server, run: claude mcp remove watch -s user\n`;
 }
 
-function fakeEnv(options: { claudeHas?: string } = {}) {
+/** A fake home with Codex, Claude Desktop and Cursor folders, and a fake `claude` CLI that logs its calls. */
+function fakeEnv(options: { claudeHas?: string; desktopOpen?: boolean } = {}) {
   const home = mkdtempSync(path.join(os.tmpdir(), "watch-install-"));
   const codexDir = path.join(home, ".codex");
   mkdirSync(codexDir);
@@ -30,6 +30,7 @@ function fakeEnv(options: { claudeHas?: string } = {}) {
       if (args[1] === "get") return options.claudeHas ? { status: 0, stdout: options.claudeHas } : { status: 1, stdout: "No MCP server found" };
       return { status: 0, stdout: "" };
     },
+    claudeDesktopOpen: () => options.desktopOpen ?? false,
   };
   process.env.CODEX_HOME = codexDir;
   return { env, home, calls, codexFile: path.join(codexDir, "config.toml") };
@@ -64,6 +65,16 @@ describe("install into AI clients", () => {
     assert.equal(planInstall(env, SERVER)[0]?.action, "update");
   });
 
+  it("leaves Claude Desktop's file alone while the app is open", () => {
+    const { env, home } = fakeEnv({ desktopOpen: true });
+    const file = path.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+    const before = readFileSync(file, "utf8");
+    const desktop = planInstall(env, SERVER).find((s) => s.client === "claude-desktop");
+    assert.equal(desktop?.action, "blocked");
+    assert.equal(desktop?.apply, undefined);
+    assert.equal(readFileSync(file, "utf8"), before);
+  });
+
   it("updates an old entry instead of duplicating it", () => {
     const { env, codexFile } = fakeEnv();
     for (const step of planInstall(env, { command: "node", args: ["/old/cli.js"] })) step.apply?.();
@@ -76,7 +87,7 @@ describe("install into AI clients", () => {
   it("skips clients that are not installed", () => {
     const home = mkdtempSync(path.join(os.tmpdir(), "watch-install-empty-"));
     process.env.CODEX_HOME = path.join(home, ".codex");
-    const steps = planInstall({ home, which: () => null, run: () => ({ status: 1, stdout: "" }) }, SERVER);
+    const steps = planInstall({ home, which: () => null, run: () => ({ status: 1, stdout: "" }), claudeDesktopOpen: () => false }, SERVER);
     assert.deepEqual(steps.map((s) => s.action), ["absent", "absent", "absent", "absent"]);
   });
 

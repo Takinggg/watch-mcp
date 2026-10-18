@@ -330,6 +330,13 @@ struct ConnectPanel: View {
             }
             .padding(12).background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.line))
+            if model.clients.contains(where: { $0.action == "blocked" }) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(L.t("Claude Desktop rewrites its settings while it is open: quit it (⌘Q), then check again.", "Claude Desktop réécrit ses réglages tant qu'il est ouvert : quitte-le (⌘Q), puis revérifie.", "Claude Desktop은 열려 있는 동안 설정을 다시 써요. 종료(⌘Q)한 뒤 다시 확인하세요."))
+                        .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Button(L.t("Check again", "Revérifier", "다시 확인")) { Task { await controller.refreshClients(install: false) } }.font(.system(size: 11))
+                }
+            }
             if model.clients.contains(where: { $0.action == "add" || $0.action == "update" }) {
                 Button(model.installing ? L.t("Connecting…", "Branchement…", "연결하는 중…") : L.t("Connect watch-mcp", "Brancher watch-mcp", "watch-mcp 연결")) { Task { await controller.refreshClients(install: true) } }
                     .buttonStyle(SecondaryButtonStyle()).disabled(model.installing)
@@ -351,6 +358,7 @@ struct ConnectPanel: View {
         switch action {
         case "ok": L.t("Connected", "Branché", "연결됨")
         case "absent": L.t("Not installed", "Non installé", "설치 안 됨")
+        case "blocked": L.t("Quit it first", "Quitte-le d'abord", "먼저 종료하세요")
         default: L.t("Not connected", "Pas branché", "연결 안 됨")
         }
     }
